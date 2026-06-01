@@ -10,10 +10,14 @@ from pathlib import Path
 
 from .mix_strategy import build_project
 from .reporting import render_markdown
+from .persistence import AppDatabase
 from .rendering import render_master
+from .settings import load_settings
 
 
-JOB_ROOT = Path("/tmp/imixing_jobs")
+settings = load_settings()
+JOB_ROOT = settings.job_root
+_db = AppDatabase(settings.database_url)
 
 
 @dataclass
@@ -31,9 +35,13 @@ class AudioJob:
     result: dict | None = None
 
     def to_dict(self) -> dict:
+        progress = {"queued": 5, "running": 50, "done": 100, "failed": 100}.get(self.status, 0)
+        if self.result and isinstance(self.result.get("progress"), int):
+            progress = self.result["progress"]
         return {
             "id": self.id,
             "status": self.status,
+            "progress": progress,
             "genre": self.genre,
             "target": self.target,
             "created_at": self.created_at,
@@ -82,6 +90,7 @@ def render_audio_job(job_id: str) -> None:
         (job.output_dir / "analysis.json").write_text(analysis_json, encoding="utf-8")
         (job.output_dir / "mix_plan.md").write_text(mix_plan, encoding="utf-8")
         job.result = {
+            "progress": 95,
             "genre": result.genre,
             "filename": "master.wav",
             "sample_rate": project.stems[0].metrics.sample_rate,
@@ -107,6 +116,7 @@ def render_audio_job(job_id: str) -> None:
             ],
         }
         job.warnings = result.warnings
+        _persist_job(job)
         _set_status(job, "done")
     except Exception as error:  # noqa: BLE001
         job.error = str(error)
@@ -123,3 +133,18 @@ def cleanup_audio_job(job_id: str) -> None:
 def _set_status(job: AudioJob, status: str) -> None:
     job.status = status
     job.updated_at = time.time()
+    _persist_job(job)
+
+
+def _persist_job(job: AudioJob) -> None:
+    try:
+        _db.update_audio_job(
+            job.id,
+            status=job.status,
+            updated_at=job.updated_at,
+            error=job.error,
+            warnings_json=json.dumps(job.warnings, ensure_ascii=False) if job.warnings else None,
+            result_json=json.dumps(job.result, ensure_ascii=False) if job.result else None,
+        )
+    except Exception:
+        pass

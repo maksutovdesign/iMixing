@@ -1,12 +1,53 @@
 services:
   - type: web
-    name: imixing-midi-doctor
+    name: imixing-web
     runtime: python
     plan: free
     region: oregon
-    envVars:
-      - key: HOST
-        value: 0.0.0.0
     healthCheckPath: /health
     buildCommand: pip install .
     startCommand: imixing-midi-web
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: IMIXING_ENV
+        value: production
+      - key: IMIXING_DATABASE_URL
+        value: sqlite:////tmp/imixing_app.db
+      - key: IMIXING_JOB_ROOT
+        value: /tmp/imixing_jobs
+      - key: IMIXING_STORAGE_BACKEND
+        value: local
+      - key: IMIXING_STORAGE_ROOT
+        value: /tmp/imixing_storage
+      - key: IMIXING_QUEUE_BACKEND
+        value: background
+      - key: IMIXING_MAX_AUDIO_UPLOAD_MB
+        value: 250
+      - key: IMIXING_MAX_AUDIO_STEMS
+        value: 24
+      - key: IMIXING_MAX_AUDIO_DURATION_SECONDS
+        value: 600
+      - key: IMIXING_MAX_MIDI_UPLOAD_MB
+        value: 10
+      - key: IMIXING_ANALYTICS_ENABLED
+        value: true
+      - key: SENTRY_DSN
+        sync: false
+
+  # Placeholder for the next production step: switch IMIXING_QUEUE_BACKEND to redis/rq/celery,
+  # provision Redis, and run the worker as a separate Render Background Worker.
+  - type: worker
+    name: imixing-worker-placeholder
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install .
+    startCommand: imixing-worker
+    envVars:
+      - key: IMIXING_ENV
+        value: production
+      - key: IMIXING_QUEUE_BACKEND
+        value: background
+      - key: IMIXING_DATABASE_URL
+        value: sqlite:////tmp/imixing_app.db

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import os
-import uuid
 import wave
 from dataclasses import asdict
 from pathlib import Path
@@ -17,7 +16,15 @@ from .midi_fixer import (
     list_instrument_family_names,
     list_style_names,
 )
+from .persistence import AppDatabase
+from .queueing import build_queue
 from .rendering import list_audio_genres
+from .settings import load_settings
+from .storage import build_storage
+from .telemetry import configure_logging, configure_sentry, track_event
+
+
+APP_ICON_PATH = Path(__file__).resolve().parents[2] / "marketing_assets" / "app-icon" / "imixing-app-icon-v1.png"
 
 
 INDEX_HTML = """<!doctype html>
@@ -26,6 +33,9 @@ INDEX_HTML = """<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>iMixing — редактор MIDI</title>
+  <link rel="icon" type="image/png" href="/assets/app-icon.png">
+  <link rel="apple-touch-icon" href="/assets/app-icon.png">
+  <meta name="theme-color" content="#050505">
   <style>
     :root {
       --bg: #f5efe4;
@@ -3143,6 +3153,20 @@ INDEX_HTML = """<!doctype html>
       masterPreview.classList.add("active");
     }
 
+    function renderAudioJobStatus(payload) {
+      const progress = Number.isFinite(Number(payload.progress)) ? Number(payload.progress) : null;
+      const progressCopy = progress === null ? "" : ` · ${progress}%`;
+      if (payload.status === "running") {
+        audioStatusEl.textContent = `${t("audio.running")}${progressCopy}`;
+        return;
+      }
+      if (payload.status === "queued") {
+        audioStatusEl.textContent = `${t("audio.queued")}${progressCopy}`;
+        return;
+      }
+      audioStatusEl.textContent = payload.status || t("audio.processing");
+    }
+
     async function pollAudioJob(jobId) {
       while (true) {
         const response = await fetch(`/api/audio/jobs/${jobId}`);
@@ -3150,15 +3174,13 @@ INDEX_HTML = """<!doctype html>
         if (!response.ok) {
           throw new Error(payload.detail || (currentLanguage === "en" ? "Could not get job status." : "Не удалось получить статус задачи."));
         }
+        renderAudioJobStatus(payload);
         if (payload.status === "done") {
           return payload;
         }
         if (payload.status === "failed") {
           throw new Error(payload.error || (currentLanguage === "en" ? "Render failed." : "Рендер завершился ошибкой."));
         }
-        audioStatusEl.textContent = payload.status === "running"
-          ? t("audio.running")
-          : t("audio.queued");
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
@@ -3928,6 +3950,9 @@ V2_HOME_HTML = f"""<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>iMixing Studio AI · Design v2</title>
+  <link rel="icon" type="image/png" href="/assets/app-icon.png">
+  <link rel="apple-touch-icon" href="/assets/app-icon.png">
+  <meta name="theme-color" content="#050505">
   <style>{V2_CSS}</style>
 </head>
 <body>
@@ -4054,6 +4079,9 @@ V2_PRICING_HTML = f"""<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>iMixing Pricing · Design v2</title>
+  <link rel="icon" type="image/png" href="/assets/app-icon.png">
+  <link rel="apple-touch-icon" href="/assets/app-icon.png">
+  <meta name="theme-color" content="#050505">
   <style>{V2_CSS}</style>
 </head>
 <body>
@@ -4154,14 +4182,19 @@ V2_PRICING_HTML = f"""<!doctype html>
 """
 
 
+settings = load_settings()
+logger = configure_logging(settings)
+configure_sentry(settings, logger)
+database = AppDatabase(settings.database_url)
+storage = build_storage(settings)
+job_queue = build_queue(settings)
+
 app = FastAPI(title="iMixing MIDI Doctor", version="0.1.0")
-MAX_AUDIO_UPLOAD_BYTES = 250 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
-FREE_DEMO_CREDITS = 5
-MIDI_CREDIT_COST = 1
-AUDIO_CREDIT_COST = 5
-CREDIT_COOKIE_NAME = "imixing_credit_session"
-CREDIT_SESSIONS: dict[str, int] = {}
+FREE_DEMO_CREDITS = settings.free_demo_credits
+MIDI_CREDIT_COST = settings.midi_credit_cost
+AUDIO_CREDIT_COST = settings.audio_credit_cost
+CREDIT_COOKIE_NAME = settings.credit_cookie_name
 
 
 def resolve_host_port() -> tuple[str, int]:
@@ -4176,9 +4209,8 @@ def resolve_host_port() -> tuple[str, int]:
 
 
 def _resolve_credit_session(response: Response, credit_session: str | None) -> str:
-    session_id = credit_session if credit_session in CREDIT_SESSIONS else uuid.uuid4().hex
-    if session_id not in CREDIT_SESSIONS:
-        CREDIT_SESSIONS[session_id] = FREE_DEMO_CREDITS
+    session_id = database.ensure_credit_session(credit_session, FREE_DEMO_CREDITS)
+    if session_id != credit_session:
         response.set_cookie(
             CREDIT_COOKIE_NAME,
             session_id,
@@ -4191,33 +4223,36 @@ def _resolve_credit_session(response: Response, credit_session: str | None) -> s
 
 def _credit_balance(response: Response, credit_session: str | None) -> int:
     session_id = _resolve_credit_session(response, credit_session)
-    return CREDIT_SESSIONS[session_id]
+    return database.credit_balance(session_id)
 
 
 def _add_credits(response: Response, credit_session: str | None, amount: int) -> int:
     if amount <= 0 or amount > 10_000:
         raise HTTPException(status_code=400, detail="Credit amount must be between 1 and 10000.")
     session_id = _resolve_credit_session(response, credit_session)
-    CREDIT_SESSIONS[session_id] += amount
-    return CREDIT_SESSIONS[session_id]
+    balance = database.change_credits(session_id, amount, reason="manual_demo_topup", feature="credits")
+    track_event(logger, settings, "credits_added", amount=amount, balance=balance)
+    return balance
 
 
 def _reset_credits(response: Response, credit_session: str | None) -> int:
     session_id = _resolve_credit_session(response, credit_session)
-    CREDIT_SESSIONS[session_id] = FREE_DEMO_CREDITS
-    return CREDIT_SESSIONS[session_id]
+    balance = database.set_credit_balance(session_id, FREE_DEMO_CREDITS, reason="manual_demo_reset", feature="credits")
+    track_event(logger, settings, "credits_reset", balance=balance)
+    return balance
 
 
 def _spend_credits(response: Response, credit_session: str | None, cost: int, feature_name: str) -> int:
     session_id = _resolve_credit_session(response, credit_session)
-    balance = CREDIT_SESSIONS[session_id]
+    balance = database.credit_balance(session_id)
     if balance < cost:
         raise HTTPException(
             status_code=402,
             detail=f"{feature_name} requires {cost} demo credit(s). Current balance: {balance}.",
         )
-    CREDIT_SESSIONS[session_id] = balance - cost
-    return CREDIT_SESSIONS[session_id]
+    balance = database.change_credits(session_id, -cost, reason="feature_usage", feature=feature_name)
+    track_event(logger, settings, "credits_spent", feature=feature_name, cost=cost, balance=balance)
+    return balance
 
 
 def _audio_job_response(job_id: str, status: str, *, detail: str | None = None) -> dict[str, str | int]:
@@ -4240,8 +4275,8 @@ async def _enqueue_audio_mix_job(
 ) -> dict[str, str | int]:
     if not files:
         raise HTTPException(status_code=400, detail="Upload at least one WAV stem.")
-    if len(files) > 24:
-        raise HTTPException(status_code=413, detail="Upload 24 stems or fewer for the MVP service.")
+    if len(files) > settings.max_audio_stems:
+        raise HTTPException(status_code=413, detail=f"Upload {settings.max_audio_stems} stems or fewer for this service tier.")
     if genre not in list_audio_genres():
         raise HTTPException(status_code=400, detail="Unsupported audio genre.")
 
@@ -4261,16 +4296,41 @@ async def _enqueue_audio_mix_job(
             written = await _write_upload_stream(upload, destination)
             if written <= 0:
                 raise HTTPException(status_code=400, detail=f"{filename} is empty.")
-            _validate_uploaded_wav_header(destination, filename)
+            duration_seconds = _validate_uploaded_wav_header(destination, filename)
+            if duration_seconds > settings.max_audio_duration_seconds:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"{filename} is longer than {settings.max_audio_duration_seconds} seconds.",
+                )
             total_size += written
-            if total_size > MAX_AUDIO_UPLOAD_BYTES:
-                raise HTTPException(status_code=413, detail="Total upload is too large for the MVP service.")
+            if total_size > settings.max_audio_upload_bytes:
+                raise HTTPException(status_code=413, detail=f"Total upload is larger than {settings.max_audio_upload_mb} MB.")
     except Exception:
         cleanup_audio_job(job.id)
         raise
 
-    background_tasks.add_task(render_audio_job, job.id)
-    return _audio_job_response(job.id, job.status)
+    database.save_audio_job(
+        job_id=job.id,
+        genre=job.genre,
+        target=job.target,
+        status=job.status,
+        input_dir=job.input_dir,
+        output_dir=job.output_dir,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+    queue_name = job_queue.enqueue(background_tasks, render_audio_job, job.id)
+    track_event(logger, settings, "audio_job_enqueued", job_id=job.id, stems=len(files), genre=genre, queue=queue_name)
+    payload = _audio_job_response(job.id, job.status)
+    payload["queue"] = queue_name
+    return payload
+
+
+@app.get("/assets/app-icon.png")
+async def app_icon() -> FileResponse:
+    if not APP_ICON_PATH.exists():
+        raise HTTPException(status_code=404, detail="App icon is missing.")
+    return FileResponse(APP_ICON_PATH, media_type="image/png", filename="imixing-app-icon.png")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -4289,8 +4349,15 @@ async def design_v2_pricing() -> HTMLResponse:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, str | int]:
+    return {
+        "status": "ok",
+        "environment": settings.environment,
+        "queue_backend": settings.queue_backend,
+        "storage_backend": settings.storage_backend,
+        "max_audio_upload_mb": settings.max_audio_upload_mb,
+        "max_audio_stems": settings.max_audio_stems,
+    }
 
 
 @app.get("/api/credits")
@@ -4339,8 +4406,8 @@ async def fix_midi(
     payload = await file.read()
     if not payload:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    if len(payload) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File is too large for the MVP service.")
+    if len(payload) > settings.max_midi_upload_bytes:
+        raise HTTPException(status_code=413, detail=f"MIDI file is larger than {settings.max_midi_upload_mb} MB.")
 
     try:
         result = fix_midi_bytes(
@@ -4357,6 +4424,7 @@ async def fix_midi(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     credits_remaining = _spend_credits(response, credit_session, MIDI_CREDIT_COST, "MIDI fix")
+    track_event(logger, settings, "midi_fix_completed", filename=filename, style=style, instrument_family=instrument_family)
     return {
         "filename": result.output_filename,
         "edited_title": result.edited_title,
@@ -4377,7 +4445,7 @@ async def mix_audio(
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
 ) -> dict[str, str | int]:
     if _credit_balance(response, credit_session) < AUDIO_CREDIT_COST:
-        raise HTTPException(status_code=402, detail="Mix & Master requires 5 demo credits.")
+        raise HTTPException(status_code=402, detail=f"Mix & Master requires {AUDIO_CREDIT_COST} demo credits.")
     payload = await _enqueue_audio_mix_job(
         background_tasks=background_tasks,
         files=files,
@@ -4399,7 +4467,7 @@ async def create_audio_mix_job(
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
 ) -> dict[str, str | int]:
     if _credit_balance(response, credit_session) < AUDIO_CREDIT_COST:
-        raise HTTPException(status_code=402, detail="Mix & Master requires 5 demo credits.")
+        raise HTTPException(status_code=402, detail=f"Mix & Master requires {AUDIO_CREDIT_COST} demo credits.")
     payload = await _enqueue_audio_mix_job(
         background_tasks=background_tasks,
         files=files,
@@ -4450,20 +4518,23 @@ async def _write_upload_stream(upload: UploadFile, destination: Path) -> int:
                 break
             output.write(chunk)
             written += len(chunk)
-            if written > MAX_AUDIO_UPLOAD_BYTES:
-                raise HTTPException(status_code=413, detail="Uploaded file is too large for the MVP service.")
+            if written > settings.max_audio_upload_bytes:
+                raise HTTPException(status_code=413, detail=f"Uploaded file is larger than {settings.max_audio_upload_mb} MB.")
     return written
 
 
-def _validate_uploaded_wav_header(path: Path, original_name: str) -> None:
+def _validate_uploaded_wav_header(path: Path, original_name: str) -> float:
     try:
         with wave.open(str(path), "rb") as wav_file:
             wav_file.getnchannels()
             wav_file.getsampwidth()
-            wav_file.getframerate()
-            wav_file.getnframes()
+            frame_rate = wav_file.getframerate()
+            frame_count = wav_file.getnframes()
     except (wave.Error, EOFError) as error:
         raise HTTPException(status_code=400, detail=f"Invalid or corrupted WAV file: {original_name}") from error
+    if frame_rate <= 0:
+        raise HTTPException(status_code=400, detail=f"Invalid WAV sample rate: {original_name}")
+    return frame_count / frame_rate
 
 
 def _unique_upload_name(filename: str, used_names: set[str]) -> str:
@@ -4477,6 +4548,132 @@ def _unique_upload_name(filename: str, used_names: set[str]) -> str:
         if candidate not in used_names:
             return candidate
         counter += 1
+
+
+def _chrome_page(title: str, body: str) -> HTMLResponse:
+    return HTMLResponse(f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title} · iMixing</title>
+  <link rel="icon" type="image/png" href="/assets/app-icon.png">
+  <link rel="apple-touch-icon" href="/assets/app-icon.png">
+  <meta name="theme-color" content="#050505">
+  <style>
+    :root {{ color-scheme: dark; --bg:#050505; --ink:#f7f7f7; --muted:#a8a8a8; --red:#ff2a36; --line:rgba(255,42,54,.32); }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; font-family:Inter, Arial, sans-serif; background:var(--bg); color:var(--ink); line-height:1.6; }}
+    main {{ width:min(960px, calc(100% - 36px)); margin:0 auto; padding:52px 0 72px; }}
+    a {{ color:var(--ink); }}
+    .brand {{ display:flex; align-items:center; gap:12px; margin-bottom:42px; color:var(--muted); text-decoration:none; }}
+    .brand img {{ width:34px; height:34px; border-radius:8px; }}
+    h1 {{ font-size:clamp(42px, 8vw, 96px); line-height:.9; letter-spacing:0; margin:0 0 24px; max-width:9ch; }}
+    h2 {{ margin:34px 0 8px; font-size:22px; }}
+    p, li {{ color:var(--muted); max-width:76ch; }}
+    form {{ display:grid; gap:14px; max-width:560px; margin-top:28px; }}
+    input, textarea, select {{ width:100%; border:1px solid var(--line); background:#0b0b0b; color:var(--ink); padding:13px 14px; border-radius:8px; font:inherit; }}
+    textarea {{ min-height:120px; resize:vertical; }}
+    button {{ border:1px solid var(--red); background:var(--red); color:white; padding:13px 18px; border-radius:8px; font-weight:800; cursor:pointer; }}
+    .signal {{ height:1px; background:linear-gradient(90deg, transparent, var(--red), transparent); margin:28px 0; }}
+    .note {{ border-left:1px solid var(--red); padding-left:16px; }}
+  </style>
+</head>
+<body>
+  <main>
+    <a class="brand" href="/v2"><img src="/assets/app-icon.png" alt=""> iMixing</a>
+    {body}
+  </main>
+</body>
+</html>""")
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page() -> HTMLResponse:
+    return _chrome_page("Terms", """
+    <h1>Terms</h1><div class="signal"></div>
+    <p class="note">Draft for early-access launch. Replace with legal counsel review before paid public sales.</p>
+    <h2>Service</h2><p>iMixing provides automated MIDI cleanup and WAV stem mix/master processing tools. Results are creative and technical assistance, not a guarantee of commercial release quality.</p>
+    <h2>User Content</h2><p>You must own or have permission to upload all audio, MIDI, lyrics, names, and related files. You keep ownership of your content.</p>
+    <h2>Acceptable Use</h2><p>Do not upload unlawful, infringing, malicious, or privacy-invasive files. We may limit, remove, or block usage that harms the service or other users.</p>
+    <h2>Beta Limits</h2><p>Early-access limits may change, including file size, duration, number of stems, credits, queues, and available formats.</p>
+    """)
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page() -> HTMLResponse:
+    return _chrome_page("Privacy", """
+    <h1>Privacy</h1><div class="signal"></div>
+    <p class="note">Draft privacy notice for beta validation.</p>
+    <h2>Data We Collect</h2><p>We may collect email, waitlist details, uploaded files, processing metadata, logs, credit/session state, and analytics events needed to operate the service.</p>
+    <h2>How We Use Data</h2><p>Data is used to process jobs, improve product quality, prevent abuse, debug failures, and contact early-access users.</p>
+    <h2>Processors</h2><p>Deployment, storage, analytics, payment, and error-monitoring providers may process data when configured for production.</p>
+    <h2>Contact</h2><p>Use the project owner contact channel listed in the repository or product site for privacy requests.</p>
+    """)
+
+
+@app.get("/refund", response_class=HTMLResponse)
+async def refund_page() -> HTMLResponse:
+    return _chrome_page("Refund", """
+    <h1>Refund</h1><div class="signal"></div>
+    <p class="note">Draft refund policy. Final terms should match the actual payment provider and launch offer.</p>
+    <h2>Beta Access</h2><p>Free demo credits and early-access trials are provided as-is and do not create paid refund obligations.</p>
+    <h2>Paid Credits</h2><p>For future paid credits, refund eligibility should depend on unused balance, duplicate purchases, failed delivery, or local consumer requirements.</p>
+    <h2>Processing Failures</h2><p>If a paid job fails because of a service error, the intended default remedy is credit restoration or equivalent reprocessing.</p>
+    """)
+
+
+@app.get("/data-retention", response_class=HTMLResponse)
+async def data_retention_page() -> HTMLResponse:
+    return _chrome_page("Data Retention", """
+    <h1>Data Retention</h1><div class="signal"></div>
+    <p class="note">Draft retention schedule for production planning.</p>
+    <h2>Uploads</h2><p>Raw uploads and generated files should be removed automatically after a defined period, for example 7 to 30 days, unless the user saves them to a paid project library.</p>
+    <h2>Job Metadata</h2><p>Job status, metrics, logs, and credit ledger entries may be retained longer for support, accounting, abuse prevention, and product analytics.</p>
+    <h2>Deletion Requests</h2><p>Early-access users may request deletion of identifiable account or waitlist data through the product owner contact channel.</p>
+    """)
+
+
+@app.get("/early-access", response_class=HTMLResponse)
+async def early_access_page() -> HTMLResponse:
+    return _chrome_page("Early Access", """
+    <h1>Early Access</h1><div class="signal"></div>
+    <p>Join the private beta for MIDI Doctor and Mix & Master. We are looking for producers, artists, beatmakers, small studios, educators, and music-tech testers.</p>
+    <form method="post" action="/api/waitlist">
+      <input name="email" type="email" placeholder="Email" required>
+      <input name="name" type="text" placeholder="Name or artist name">
+      <select name="role">
+        <option value="producer">Producer / beatmaker</option>
+        <option value="artist">Artist / songwriter</option>
+        <option value="studio">Studio / engineer</option>
+        <option value="educator">Educator / community</option>
+      </select>
+      <textarea name="message" placeholder="What would you like iMixing to fix first?"></textarea>
+      <button type="submit">Request access</button>
+    </form>
+    """)
+
+
+@app.post("/api/waitlist")
+async def join_waitlist(
+    email: str = Form(...),
+    name: str | None = Form(None),
+    role: str | None = Form(None),
+    message: str | None = Form(None),
+    source: str | None = Form("early-access"),
+) -> dict[str, str]:
+    normalized_email = email.strip().lower()
+    if "@" not in normalized_email or len(normalized_email) > 254:
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    signup_id = database.add_waitlist_signup(
+        email=normalized_email,
+        name=name.strip() if name else None,
+        role=role.strip() if role else None,
+        message=message.strip() if message else None,
+        source=source.strip() if source else None,
+    )
+    track_event(logger, settings, "waitlist_signup", signup_id=signup_id, role=role or "unknown", source=source or "unknown")
+    return {"status": "ok", "id": signup_id}
 
 
 def main() -> None:

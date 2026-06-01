@@ -245,3 +245,46 @@ brew install ffmpeg
 - Add persistent job storage for uploaded MIDI revisions.
 - Add instrument-specific MIDI repair profiles beyond the current style system.
 - Add desktop wrapper on top of the same MIDI repair API.
+
+
+## Production Launch Notes
+
+The repository now includes a production-shaped configuration layer while keeping the MVP simple enough to deploy quickly.
+
+Runtime configuration lives in environment variables. Copy `.env.example`, fill real secrets locally or in Render, and keep `.env` out of git.
+
+Important limits:
+
+- `IMIXING_MAX_AUDIO_UPLOAD_MB` controls total uploaded WAV size.
+- `IMIXING_MAX_AUDIO_STEMS` controls the number of uploaded stems per job.
+- `IMIXING_MAX_AUDIO_DURATION_SECONDS` is reserved for duration enforcement in the production renderer.
+- `IMIXING_MAX_MIDI_UPLOAD_MB` controls MIDI upload size.
+- `IMIXING_FREE_DEMO_CREDITS`, `IMIXING_MIDI_CREDIT_COST`, and `IMIXING_AUDIO_CREDIT_COST` control beta credit behavior.
+
+Persistence:
+
+- Demo credit sessions, credit ledger entries, audio job metadata, projects, users, and waitlist signups are modeled in SQLite through `IMIXING_DATABASE_URL`.
+- The first migration is in `migrations/001_initial.sql`.
+- The adapter is intentionally PostgreSQL-compatible at the schema boundary, but the MVP runtime currently supports `sqlite:///` URLs.
+
+Storage and queues:
+
+- `IMIXING_STORAGE_BACKEND=local` stores files locally for MVP deployment.
+- `IMIXING_STORAGE_BACKEND=s3` or `r2` is reserved for the S3/R2 adapter.
+- `IMIXING_QUEUE_BACKEND=background` uses FastAPI background tasks.
+- `redis`, `rq`, and `celery` are reserved queue modes for the separate worker step.
+
+Public pages prepared for launch:
+
+- `/early-access`
+- `/terms`
+- `/privacy`
+- `/refund`
+- `/data-retention`
+
+Operational hooks:
+
+- `/health` returns environment, queue, storage, and current limits.
+- Structured JSON logging is enabled by default.
+- Analytics events are emitted to logs.
+- `SENTRY_DSN` activates Sentry if `sentry-sdk` is installed in the production environment.

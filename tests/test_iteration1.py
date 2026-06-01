@@ -269,6 +269,55 @@ class WebEndpointTests(unittest.TestCase):
 
                 self.addCleanup(cleanup_audio_job, payload["id"])
 
+    def test_launch_pages_health_and_icon_are_available(self) -> None:
+        with TestClient(app) as client:
+            health = client.get("/health")
+            icon = client.get("/assets/app-icon.png")
+            terms = client.get("/terms")
+            privacy = client.get("/privacy")
+            early_access = client.get("/early-access")
+
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.json()["status"], "ok")
+        self.assertIn("queue_backend", health.json())
+        self.assertEqual(icon.status_code, 200)
+        self.assertIn("image/png", icon.headers["content-type"])
+        self.assertEqual(terms.status_code, 200)
+        self.assertIn("Terms", terms.text)
+        self.assertEqual(privacy.status_code, 200)
+        self.assertIn("Privacy", privacy.text)
+        self.assertEqual(early_access.status_code, 200)
+        self.assertIn("Request access", early_access.text)
+
+    def test_waitlist_endpoint_accepts_beta_signup(self) -> None:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/waitlist",
+                data={
+                    "email": "Producer@Example.com",
+                    "name": "Test Producer",
+                    "role": "producer",
+                    "message": "Need mix/master beta access.",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["id"])
+
+    def test_audio_jobs_enforces_stem_count_limit_before_processing(self) -> None:
+        files = [("files", (f"stem_{index}.wav", b"RIFF", "audio/wav")) for index in range(25)]
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/audio/jobs",
+                data={"genre": "balanced", "target": "streaming:-14LUFS:-1dBTP"},
+                files=files,
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("24 stems", response.json()["detail"])
+
     def test_resolve_host_port_defaults_to_loopback(self) -> None:
         with mock.patch.dict("os.environ", {}, clear=True):
             host, port = resolve_host_port()
