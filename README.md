@@ -2,6 +2,8 @@
 
 ![iMixing preview](marketing_assets/presentation/imixing-presentation-preview.png)
 
+[Public project demo](https://maksutovdesign.github.io/iMixing/) · [GitHub repository](https://github.com/maksutovdesign/iMixing)
+
 iMixing Agent is a prototype agent for mixing and mastering separated music stems. A user provides separate tracks such as drums, bass, vocals, guitars, keys, or effects. The agent analyzes every stem, builds an instrument-aware processing chain, prepares a mix strategy, and produces a final mastering plan.
 
 This repository starts with a practical MVP: an offline analysis, mix-plan generator, and real audio renderer for WAV stems.
