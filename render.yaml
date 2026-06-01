@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: imixing-midi-doctor
+    runtime: python
+    plan: free
+    region: oregon
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+    healthCheckPath: /health
+    buildCommand: pip install .
+    startCommand: imixing-midi-web

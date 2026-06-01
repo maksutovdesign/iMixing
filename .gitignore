@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+.DS_Store
+.venv/
+.tools/
+out/
+.cache/
+incoming_stems/
+rendered_masters/
+*.wav
+*.mp3
+*.flac
+*.aiff

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "imixing-agent"
+version = "0.1.0"
+description = "Prototype agent for analyzing music stems and generating mix/mastering plans."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "librosa>=0.10",
+    "numpy>=1.24",
+    "pedalboard>=0.9",
+    "pyloudnorm>=0.1.1",
+    "python-multipart>=0.0.9",
+    "soundfile>=0.12",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+imixing-agent = "imixing_agent.cli:main"
+imixing-midi-fix = "imixing_agent.midi_cli:main"
+imixing-midi-web = "imixing_agent.midi_web:main"
+imixing-midi-telegram = "imixing_agent.midi_telegram_bot:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
