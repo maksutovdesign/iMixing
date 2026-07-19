@@ -1,0 +1,16 @@
+services:
+  imixing-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: imixing-web
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - "${IMIXING_HOST_PORT:-80}:8000"
+    volumes:
+      - imixing_data:/data
+
+volumes:
+  imixing_data:
