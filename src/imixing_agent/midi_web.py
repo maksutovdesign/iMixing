@@ -34,7 +34,7 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>iMixing — редактор MIDI</title>
+  <title>iMixing — MIDI & Audio Studio</title>
   <link rel="icon" type="image/png" href="/assets/app-icon.png">
   <link rel="apple-touch-icon" href="/assets/app-icon.png">
   <meta name="theme-color" content="#050505">
@@ -1930,6 +1930,44 @@ INDEX_HTML = """<!doctype html>
         height: auto;
       }
     }
+
+    /* Composer workspace for the generator, while MIDI Doctor, Mix & Master and pricing retain the same shell. */
+    .generator-workspace { display: grid; grid-template-columns: minmax(300px, .8fr) minmax(0, 1.35fr); gap: 24px; padding: 36px 56px 58px; }
+    .generator-sidebar, .generator-stage { min-width: 0; background: #101010; border: 1px solid var(--line); border-radius: 22px; }
+    .generator-sidebar { padding: 26px; }
+    .generator-kicker, .studio-label, .generator-output-label { color: var(--accent); font-family: "IBM Plex Mono", "Noto Sans Mono", ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .generator-title { margin: 10px 0 5px; font-size: 28px; line-height: 1; letter-spacing: -.04em; }
+    .generator-intro { margin: 0 0 24px; color: var(--muted); font-size: 14px; line-height: 1.48; }
+    .generator-controls { display: grid; gap: 18px; }
+    .generator-control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .generator-sidebar label { gap: 7px; color: #d0d0d0; font-size: 12px; font-weight: 700; }
+    .generator-sidebar input, .generator-sidebar select { width: 100%; min-height: 43px; padding: 10px 12px; background: #090909; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); font: inherit; outline: none; }
+    .generator-sidebar input:focus, .generator-sidebar select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(240,50,50,.15); }
+    .generator-parts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .generator-parts .checkbox { display: flex; min-height: 42px; justify-content: center; gap: 7px; padding: 8px 6px; background: #090909; border: 1px solid var(--line); border-radius: 10px; color: #d9d9d9; font-size: 11px; white-space: nowrap; }
+    .generator-parts .checkbox input { width: 14px; min-height: 14px; accent-color: var(--accent); }
+    .generator-sidebar .secondary-button, .generator-sidebar #generatorSubmitButton { width: 100%; }
+    .generator-sidebar #generatorSubmitButton { min-height: 52px; }
+    .generator-sidebar .status { min-height: 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; }
+    .generator-stage { display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background: #090909; }
+    .generator-stage-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 22px 24px 18px; border-bottom: 1px solid var(--line); }
+    .generator-stage-title { margin: 5px 0 0; font-size: 19px; letter-spacing: -.025em; }
+    .studio-badge { padding: 7px 10px; border: 1px solid rgba(240,50,50,.48); border-radius: 999px; color: var(--accent); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; font-weight: 700; letter-spacing: .08em; white-space: nowrap; }
+    .piano-roll { position: relative; min-height: 406px; padding: 44px 24px 24px 68px; overflow: hidden; background-color: #0c0c0c; background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(8.333% - 1px), #242424 calc(8.333% - 1px), #242424 8.333%), repeating-linear-gradient(to bottom, transparent 0, transparent 39px, #202020 39px, #202020 40px); }
+    .piano-roll::before { content: "01     02     03     04     05     06     07     08"; position: absolute; top: 14px; left: 69px; color: #777; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; letter-spacing: 1.9em; white-space: nowrap; }
+    .roll-labels { position: absolute; top: 44px; bottom: 22px; left: 0; width: 67px; display: grid; grid-template-rows: repeat(9, 40px); border-right: 1px solid var(--line); background: #101010; }
+    .roll-labels span { display: grid; place-items: center; color: #a0a0a0; border-bottom: 1px solid #252525; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; }
+    .note { position: absolute; height: 22px; border-radius: 3px; background: var(--accent); }
+    .note.soft { background: #b72a2a; } .note.dim { background: #6e2424; }
+    .note.n1 { left: 14%; top: 229px; width: 17%; } .note.n2 { left: 33%; top: 189px; width: 10%; } .note.n3 { left: 45%; top: 149px; width: 16%; } .note.n4 { left: 63%; top: 189px; width: 11%; } .note.n5 { left: 76%; top: 109px; width: 13%; } .note.n6 { left: 24%; top: 309px; width: 10%; } .note.n7 { left: 37%; top: 269px; width: 19%; } .note.n8 { left: 59%; top: 309px; width: 14%; } .note.n9 { left: 75%; top: 269px; width: 9%; }
+    .drum-lane { display: grid; grid-template-columns: 68px repeat(16, 1fr); gap: 4px; padding: 15px 24px; border-top: 1px solid var(--line); background: #101010; }
+    .drum-lane strong { align-self: center; color: #a4a4a4; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; letter-spacing: .05em; }
+    .drum-step { aspect-ratio: 1; border: 1px solid #343434; background: #161616; }.drum-step.hit { border-color: var(--accent); background: var(--accent); }.drum-step.ghost { border-color: #7d2626; background: #442020; }
+    .generator-output { padding: 20px 24px 24px; border-top: 1px solid var(--line); background: #101010; }
+    .generator-output-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 12px; }.generator-output-note { color: var(--muted); font-size: 12px; }
+    .generator-stage .stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 0; }.generator-stage .stat { display: grid; gap: 4px; padding: 11px; background: #090909; border-radius: 8px; font-size: 11px; }.generator-stage .stat strong { color: var(--ink); font-size: 14px; }
+    @media (max-width: 900px) { .generator-workspace { grid-template-columns: 1fr; padding: 28px 32px 42px; } }
+    @media (max-width: 780px) { .generator-workspace { gap: 16px; padding: 22px 18px 30px; }.generator-sidebar { padding: 20px; }.generator-control-grid { grid-template-columns: 1fr; }.piano-roll { min-height: 320px; padding-left: 49px; }.roll-labels { width: 48px; }.piano-roll::before { left: 51px; letter-spacing: .72em; }.generator-stage .stats { grid-template-columns: repeat(2,1fr); }.drum-lane { grid-template-columns: 46px repeat(16,1fr); padding: 12px; gap: 3px; }.generator-output { padding: 18px; } }
   </style>
 </head>
 <body>
@@ -1937,8 +1975,8 @@ INDEX_HTML = """<!doctype html>
     <section class="hero">
       <div class="hero-top">
         <div>
-          <div class="eyebrow" data-i18n="hero.eyebrow">iMixing · редактор MIDI</div>
-          <h1 data-i18n="hero.title">Правим MIDI так, чтобы он звучал собранно.</h1>
+          <div class="eyebrow" data-i18n="hero.eyebrow">iMixing · MIDI &amp; audio studio</div>
+          <h1 data-i18n="hero.title">Музыкальные идеи, MIDI и мастер в одном рабочем пространстве.</h1>
           <p class="subtitle" data-i18n="hero.subtitle">
             Загрузите MIDI для музыкального исправления или WAV-дорожки для быстрого сведения и мастеринга. Сервис обработает материал и отдаст готовый файл обратно.
           </p>
@@ -1957,7 +1995,7 @@ INDEX_HTML = """<!doctype html>
     </section>
 
     <nav class="tabs" aria-label="Режим сервиса">
-      <button class="tab-button active" type="button" data-tab="midiPanel">
+      <button class="tab-button" type="button" data-tab="midiPanel">
         <span class="tab-index">01</span>
         <span class="tab-label" data-i18n="tabs.midi">Редактор MIDI</span>
         <span class="tab-meta" data-i18n="tabs.midiMeta">правка · гармония · экспорт</span>
@@ -1967,7 +2005,7 @@ INDEX_HTML = """<!doctype html>
         <span class="tab-label" data-i18n="tabs.audio">Сведение и мастеринг</span>
         <span class="tab-meta" data-i18n="tabs.audioMeta">дорожки · LUFS · мастер WAV</span>
       </button>
-      <button class="tab-button" type="button" data-tab="generatorPanel">
+      <button class="tab-button active" type="button" data-tab="generatorPanel">
         <span class="tab-index">03</span>
         <span class="tab-label" data-i18n="tabs.generator">MIDI Generator</span>
         <span class="tab-meta" data-i18n="tabs.generatorMeta">бас · мелодия · драм-машина</span>
@@ -1979,7 +2017,7 @@ INDEX_HTML = """<!doctype html>
       </button>
     </nav>
 
-    <section class="panel active" id="midiPanel">
+    <section class="panel" id="midiPanel">
     <section class="grid">
       <div class="card">
         <div class="pill" data-i18n="midi.pill">Перетащить · исправить · скачать</div>
@@ -2160,11 +2198,14 @@ INDEX_HTML = """<!doctype html>
     </section>
     </section>
 
-    <section class="panel" id="generatorPanel">
-      <section class="grid">
-        <div class="card">
-          <div class="pill" data-i18n="generator.pill">Музыкальные правила · MIDI до 10 минут</div>
-          <div class="controls">
+    <section class="panel active" id="generatorPanel">
+      <section class="generator-workspace">
+        <aside class="generator-sidebar">
+          <div class="generator-kicker" data-i18n="generator.pill">Музыкальные правила · MIDI до 10 минут</div>
+          <h2 class="generator-title">MIDI Generator</h2>
+          <p class="generator-intro">Соберите характер партии и получите воспроизводимый MIDI для DAW.</p>
+          <div class="generator-controls">
+            <div class="generator-control-grid">
             <label><span data-i18n="generator.style">Стиль</span><select id="generatorStyle"><option value="pop">Pop</option><option value="rap">Rap</option><option value="trap">Trap</option><option value="house">House</option><option value="techno">Techno</option><option value="edm">EDM</option><option value="rock">Rock</option><option value="cinematic">Cinematic</option><option value="jazz">Jazz</option></select></label>
             <label><span data-i18n="generator.key">Тональность</span><select id="generatorKey"><option>C</option><option>C#</option><option>D</option><option>Eb</option><option>E</option><option>F</option><option>F#</option><option>G</option><option>Ab</option><option>A</option><option>Bb</option><option>B</option></select></label>
             <label><span data-i18n="generator.scale">Лад</span><select id="generatorScale"><option value="minor" data-i18n="generator.minor">Минор</option><option value="major" data-i18n="generator.major">Мажор</option></select></label>
@@ -2175,18 +2216,34 @@ INDEX_HTML = """<!doctype html>
             <label><span data-i18n="generator.density">Плотность</span><input id="generatorDensity" type="number" min="0.1" max="1" step="0.05" value="0.65"></label>
             <label><span data-i18n="generator.seed">Seed</span><input id="generatorSeed" type="number" placeholder="авто"></label>
             <label><span data-i18n="generator.motif">Мотив / ноты MIDI</span><input id="generatorMotif" type="text" placeholder="60, 64, 67"></label>
-            <label class="checkbox"><input id="generatorBass" type="checkbox" checked><span data-i18n="generator.bass">Bassline</span></label>
-            <label class="checkbox"><input id="generatorMelody" type="checkbox" checked><span data-i18n="generator.melody">Melody</span></label>
-            <label class="checkbox"><input id="generatorDrums" type="checkbox" checked><span data-i18n="generator.drums">Drum machine</span></label>
+            </div>
+            <div class="generator-parts" aria-label="Партии для генерации">
+              <label class="checkbox"><input id="generatorBass" type="checkbox" checked><span data-i18n="generator.bass">Bassline</span></label>
+              <label class="checkbox"><input id="generatorMelody" type="checkbox" checked><span data-i18n="generator.melody">Melody</span></label>
+              <label class="checkbox"><input id="generatorDrums" type="checkbox" checked><span data-i18n="generator.drums">Drum machine</span></label>
+            </div>
             <button id="captureMidiButton" type="button" class="secondary-button" data-i18n="generator.capture">Записать ноты с MIDI-клавиатуры</button>
             <button id="generatorSubmitButton" type="button" data-i18n="generator.submit">Сгенерировать и скачать MIDI</button>
             <div class="status" id="generatorStatus" data-i18n="generator.statusEmpty">Выберите характер будущей партии.</div>
           </div>
-        </div>
-        <div class="card">
-          <div class="stats" id="generatorStats"></div>
-          <p class="hint" data-i18n="generator.hint">Генератор создаёт воспроизводимый MIDI по музыкальным правилам. Seed позволяет получить тот же результат, а ввод MIDI-нот задаёт мотив для мелодии. Для физической MIDI-клавиатуры нажмите кнопку записи и сыграйте ноты.</p>
-        </div>
+        </aside>
+        <section class="generator-stage" aria-label="Предпросмотр музыкальной структуры">
+          <header class="generator-stage-header">
+            <div><div class="studio-label">MIDI arrangement</div><h2 class="generator-stage-title">Партия в реальном времени</h2></div>
+            <span class="studio-badge">READY</span>
+          </header>
+          <div>
+            <div class="piano-roll" aria-hidden="true">
+              <div class="roll-labels"><span>C5</span><span>A#4</span><span>G4</span><span>F4</span><span>D#4</span><span>C4</span><span>A#3</span><span>G3</span><span>F3</span></div>
+              <i class="note n1"></i><i class="note soft n2"></i><i class="note n3"></i><i class="note dim n4"></i><i class="note soft n5"></i><i class="note dim n6"></i><i class="note n7"></i><i class="note soft n8"></i><i class="note n9"></i>
+            </div>
+            <div class="drum-lane" aria-hidden="true"><strong>DRUMS</strong><i class="drum-step hit"></i><i class="drum-step"></i><i class="drum-step ghost"></i><i class="drum-step"></i><i class="drum-step hit"></i><i class="drum-step"></i><i class="drum-step"></i><i class="drum-step ghost"></i><i class="drum-step hit"></i><i class="drum-step"></i><i class="drum-step ghost"></i><i class="drum-step"></i><i class="drum-step hit"></i><i class="drum-step"></i><i class="drum-step"></i><i class="drum-step ghost"></i></div>
+          </div>
+          <footer class="generator-output">
+            <div class="generator-output-head"><span class="generator-output-label">MIDI output</span><span class="generator-output-note">Параметры появятся после генерации</span></div>
+            <div class="stats" id="generatorStats"><div class="stat"><span>ДЛИТЕЛЬНОСТЬ</span><strong>60 сек</strong></div><div class="stat"><span>СЛОИ</span><strong>3 партии</strong></div><div class="stat"><span>СЕТКА</span><strong>1/16</strong></div><div class="stat"><span>ЭКСПОРТ</span><strong>.mid</strong></div></div>
+          </footer>
+        </section>
       </section>
     </section>
 
@@ -2501,10 +2558,10 @@ INDEX_HTML = """<!doctype html>
     const downloadAnalysisButton = document.getElementById("downloadAnalysisButton");
     const translations = {
       ru: {
-        "meta.title": "iMixing — редактор MIDI",
-        "hero.eyebrow": "iMixing · редактор MIDI",
-        "hero.title": "Правим MIDI так, чтобы он звучал собранно.",
-        "hero.subtitle": "Загрузите MIDI для музыкального исправления или WAV-дорожки для быстрого сведения и мастеринга. Сервис обработает материал и отдаст готовый файл обратно.",
+        "meta.title": "iMixing — MIDI и аудио-студия",
+        "hero.eyebrow": "iMixing · MIDI и аудио-студия",
+        "hero.title": "Музыкальные идеи, MIDI и мастер в одном рабочем пространстве.",
+        "hero.subtitle": "Генерируйте новые MIDI-партии, исправляйте существующие файлы или соберите WAV-дорожки в готовый мастер.",
         "credits.label": "демо-баллы",
         "tabs.midi": "Редактор MIDI",
         "tabs.midiMeta": "правка · гармония · экспорт",
@@ -2725,10 +2782,10 @@ INDEX_HTML = """<!doctype html>
         "demo.reset": "Сбросить до бесплатного демо"
       },
       en: {
-        "meta.title": "iMixing — MIDI repair and mastering",
-        "hero.eyebrow": "iMixing MIDI Doctor",
-        "hero.title": "Make MIDI feel arranged, not random.",
-        "hero.subtitle": "Upload MIDI for musical repair or WAV stems for a fast mix and master. The service analyzes the material, processes it, and returns a clean export.",
+        "meta.title": "iMixing — MIDI & Audio Studio",
+        "hero.eyebrow": "iMixing · MIDI & Audio Studio",
+        "hero.title": "Ideas, MIDI and mastering in one workspace.",
+        "hero.subtitle": "Generate new MIDI parts, repair existing files or turn WAV stems into a finished master.",
         "credits.label": "demo credits",
         "tabs.midi": "MIDI Doctor",
         "tabs.midiMeta": "repair · harmony · export",
