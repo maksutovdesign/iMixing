@@ -16,6 +16,7 @@ dependencies = [
     "pedalboard>=0.9",
     "pyloudnorm>=0.1.1",
     "python-multipart>=0.0.9",
+    "scipy>=1.10",
     "soundfile>=0.12",
     "uvicorn>=0.30",
 ]

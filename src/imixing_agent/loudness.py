@@ -10,6 +10,9 @@ class LoudnessMetrics:
     integrated_lufs: float
     true_peak_dbtp: float
     sample_peak_dbfs: float
+    short_term_max_lufs: float | None
+    loudness_range_lu: float | None
+    crest_factor_db: float
     method: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -19,24 +22,33 @@ class LoudnessMetrics:
 def analyze_loudness(audio, sample_rate: int, np) -> LoudnessMetrics:
     sample_peak = _peak_db(audio, np)
     true_peak = _true_peak_db(audio, np)
+    crest_factor = sample_peak - _rms_loudness(audio, np)
 
     try:
         import pyloudnorm as pyln
     except ImportError:
+        integrated = _rms_loudness(audio, np)
         return LoudnessMetrics(
-            integrated_lufs=round(_rms_loudness(audio, np), 2),
+            integrated_lufs=round(integrated, 2),
             true_peak_dbtp=round(true_peak, 2),
             sample_peak_dbfs=round(sample_peak, 2),
-            method="rms-fallback",
+            short_term_max_lufs=round(_max_window_rms_loudness(audio, sample_rate, np), 2),
+            loudness_range_lu=round(_window_loudness_range(audio, sample_rate, np), 2),
+            crest_factor_db=round(crest_factor, 2),
+            method="rms-fallback (install pyloudnorm for BS.1770 loudness)",
         )
 
     meter = pyln.Meter(sample_rate)
     integrated = float(meter.integrated_loudness(audio))
+    short_term_values = _short_term_loudness(audio, sample_rate, meter, np)
     return LoudnessMetrics(
         integrated_lufs=round(integrated, 2),
         true_peak_dbtp=round(true_peak, 2),
         sample_peak_dbfs=round(sample_peak, 2),
-        method="pyloudnorm",
+        short_term_max_lufs=round(max(short_term_values), 2) if short_term_values else None,
+        loudness_range_lu=round(_percentile_range(short_term_values, np), 2) if short_term_values else None,
+        crest_factor_db=round(crest_factor, 2),
+        method="BS.1770 via pyloudnorm; true peak 4x oversampled",
     )
 
 
@@ -55,6 +67,16 @@ def target_lufs(target: str) -> float:
     if "-16lufs" in compact:
         return -16.0
     return -14.0
+
+
+def target_true_peak_dbtp(target: str) -> float:
+    """Read an optional dBTP ceiling from the public target string."""
+    compact = target.lower().replace(" ", "")
+    for value in (-0.3, -0.5, -0.8, -1.0, -1.5, -2.0):
+        marker = f"{value:g}dbtp"
+        if marker in compact:
+            return value
+    return -1.0
 
 
 def gain_to_lufs(audio, sample_rate: int, target: str, np) -> tuple[float, LoudnessMetrics]:
@@ -77,18 +99,62 @@ def _peak_db(audio, np) -> float:
 
 
 def _true_peak_db(audio, np) -> float:
-    oversampled = _oversample_linear(audio, np, factor=4)
+    oversampled = _oversample_true_peak(audio, np, factor=4)
     return _peak_db(oversampled, np)
 
 
-def _oversample_linear(audio, np, *, factor: int):
+def _oversample_true_peak(audio, np, *, factor: int):
+    """Use a band-limited resampler when available; do not call linear interpolation true peak."""
     if factor <= 1 or len(audio) < 2:
         return audio
 
-    sample_count = audio.shape[0]
-    source = np.arange(sample_count)
-    target = np.linspace(0, sample_count - 1, sample_count * factor)
-    channels = []
-    for channel in range(audio.shape[1]):
-        channels.append(np.interp(target, source, audio[:, channel]))
-    return np.column_stack(channels)
+    try:
+        from scipy.signal import resample_poly
+
+        return resample_poly(audio, up=factor, down=1, axis=0, window=("kaiser", 8.6))
+    except ImportError:
+        # A conservative fallback: never claim an interpolated value is BS.1770 true peak.
+        return audio
+
+
+def _short_term_loudness(audio, sample_rate: int, meter, np) -> list[float]:
+    window = max(1, int(sample_rate * 3))
+    hop = max(1, int(sample_rate))
+    if len(audio) < max(1, int(sample_rate * 0.4)):
+        return []
+    values = []
+    for start in range(0, max(1, len(audio) - window + 1), hop):
+        chunk = audio[start : start + window]
+        if len(chunk) < int(sample_rate * 0.4):
+            continue
+        try:
+            values.append(float(meter.integrated_loudness(chunk)))
+        except ValueError:
+            continue
+    return values
+
+
+def _max_window_rms_loudness(audio, sample_rate: int, np) -> float:
+    values = _window_rms_loudness(audio, sample_rate, np)
+    return max(values) if values else _rms_loudness(audio, np)
+
+
+def _window_loudness_range(audio, sample_rate: int, np) -> float:
+    return _percentile_range(_window_rms_loudness(audio, sample_rate, np), np)
+
+
+def _window_rms_loudness(audio, sample_rate: int, np) -> list[float]:
+    window = max(1, int(sample_rate * 3))
+    hop = max(1, int(sample_rate))
+    values = []
+    for start in range(0, max(1, len(audio) - window + 1), hop):
+        chunk = audio[start : start + window]
+        if len(chunk):
+            values.append(_rms_loudness(chunk, np))
+    return values
+
+
+def _percentile_range(values: list[float], np) -> float:
+    if len(values) < 2:
+        return 0.0
+    return float(np.percentile(values, 95) - np.percentile(values, 10))

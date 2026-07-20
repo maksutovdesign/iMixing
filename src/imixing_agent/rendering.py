@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .loudness import LoudnessMetrics, analyze_loudness, target_lufs
+from .loudness import LoudnessMetrics, analyze_loudness, target_lufs, target_true_peak_dbtp
 from .models import MixProject, StemPlan
 
 
@@ -22,6 +22,7 @@ class RenderResult:
     genre: str
     premaster_loudness: LoudnessMetrics
     master_loudness: LoudnessMetrics
+    quality_report: dict[str, Any]
 
 
 ROLE_RENDER_SETTINGS: dict[str, dict[str, Any]] = {
@@ -197,8 +198,15 @@ def render_master(
     sf.write(master_path, master, sample_rate, subtype="PCM_24")
 
     preview_path = _write_mp3_preview(master_path, warnings)
-    if master_loudness.method == "rms-fallback":
+    if master_loudness.method.startswith("rms-fallback"):
         warnings.append("pyloudnorm is not installed; LUFS used RMS fallback estimation.")
+    desired_lufs = target_lufs(project.mastering_target)
+    if abs(master_loudness.integrated_lufs - desired_lufs) > 1.0:
+        warnings.append("Selected loudness target could not be reached safely without exceeding the true-peak ceiling.")
+    from .quality import assess_render_quality
+
+    quality_report = assess_render_quality(project, master_loudness, project.mastering_target).to_dict()
+    warnings.extend(item for item in quality_report["warnings"] if item not in warnings)
     return RenderResult(
         master_path=master_path,
         rough_mix_path=rough_mix_path,
@@ -207,6 +215,7 @@ def render_master(
         genre=preset_name,
         premaster_loudness=premaster_loudness,
         master_loudness=master_loudness,
+        quality_report=quality_report,
     )
 
 
@@ -335,8 +344,9 @@ def _apply_track_board(audio, sample_rate: int, settings: dict[str, Any], deps: 
 
 def _master_bus(audio, sample_rate: int, target: str, deps: dict[str, Any], preset: dict[str, Any]):
     np = deps["np"]
+    ceiling = target_true_peak_dbtp(target)
     if deps.get("simple_renderer"):
-        return _simple_master_bus(audio, sample_rate, target, np)
+        return _simple_master_bus(audio, sample_rate, target, ceiling, np)
 
     compression_board = deps["Pedalboard"](
         [
@@ -347,11 +357,8 @@ def _master_bus(audio, sample_rate: int, target: str, deps: dict[str, Any], pres
     metrics = analyze_loudness(compressed, sample_rate, np)
     target_gain_db = max(-12.0, min(target_lufs(target) - metrics.integrated_lufs, 9.0))
     gained = (compressed * (10.0 ** (target_gain_db / 20.0))).astype(np.float32)
-    limited = deps["Pedalboard"]([deps["Limiter"](threshold_db=-1.0, release_ms=80.0)])(gained, sample_rate)
-    final_metrics = analyze_loudness(limited, sample_rate, np)
-    final_gain_db = target_lufs(target) - final_metrics.integrated_lufs
-    loudness_matched = (limited * (10.0 ** (final_gain_db / 20.0))).astype(np.float32)
-    return _constrain_true_peak(loudness_matched, sample_rate, -1.0, np).astype(np.float32)
+    limited = deps["Pedalboard"]([deps["Limiter"](threshold_db=ceiling, release_ms=80.0)])(gained, sample_rate)
+    return _constrain_true_peak(limited, sample_rate, ceiling, np).astype(np.float32)
 
 
 def _apply_simple_track_processing(audio, sample_rate: int, settings: dict[str, Any], np):
@@ -367,16 +374,13 @@ def _apply_simple_track_processing(audio, sample_rate: int, settings: dict[str, 
     return processed.astype(np.float32)
 
 
-def _simple_master_bus(audio, sample_rate: int, target: str, np):
+def _simple_master_bus(audio, sample_rate: int, target: str, ceiling: float, np):
     compressed = _simple_soft_compress(audio, np, drive=1.15)
     metrics = analyze_loudness(compressed, sample_rate, np)
     target_gain_db = max(-12.0, min(target_lufs(target) - metrics.integrated_lufs, 9.0))
     gained = (compressed * (10.0 ** (target_gain_db / 20.0))).astype(np.float32)
     limited = np.tanh(gained * 1.05).astype(np.float32)
-    final_metrics = analyze_loudness(limited, sample_rate, np)
-    final_gain_db = max(-6.0, min(target_lufs(target) - final_metrics.integrated_lufs, 6.0))
-    loudness_matched = (limited * (10.0 ** (final_gain_db / 20.0))).astype(np.float32)
-    return _constrain_true_peak(loudness_matched, sample_rate, -1.0, np).astype(np.float32)
+    return _constrain_true_peak(limited, sample_rate, ceiling, np).astype(np.float32)
 
 
 def _simple_soft_compress(audio, np, drive: float = 1.0):

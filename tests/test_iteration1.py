@@ -37,6 +37,7 @@ from fastapi.testclient import TestClient
 from imixing_agent import cli
 from imixing_agent.audio_jobs import cleanup_audio_job
 from imixing_agent.audio_analysis import analyze_wav
+from imixing_agent.loudness import target_true_peak_dbtp
 from imixing_agent.midi_fixer import MidiFixOptions, Note, fix_midi_bytes, parse_midi_bytes, render_midi_bytes
 from imixing_agent.midi_web import app, resolve_host_port
 from imixing_agent.mix_strategy import build_project
@@ -158,6 +159,10 @@ class MidiHardeningTests(unittest.TestCase):
 
 
 class AudioHardeningTests(unittest.TestCase):
+    def test_mastering_target_reads_true_peak_ceiling(self) -> None:
+        self.assertEqual(target_true_peak_dbtp("streaming:-14LUFS:-1dBTP"), -1.0)
+        self.assertEqual(target_true_peak_dbtp("custom:-12LUFS:-0.3dBTP"), -0.3)
+
     def test_analyze_wav_rejects_invalid_file_as_value_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             path = Path(temp_root) / "broken.wav"
@@ -241,6 +246,8 @@ class WebEndpointTests(unittest.TestCase):
                 self.assertIn("master", job["result"]["files"])
                 self.assertIn("rough", job["result"]["files"])
                 self.assertIn("loudness", job["result"])
+                self.assertIn("quality", job["result"])
+                self.assertIn("status", job["result"]["quality"])
 
                 master_response = client.get(job["result"]["files"]["master"])
                 analysis_response = client.get(job["result"]["files"]["analysis"])

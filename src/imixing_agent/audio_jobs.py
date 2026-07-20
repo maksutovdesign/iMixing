@@ -98,6 +98,7 @@ def render_audio_job(job_id: str) -> None:
                 "premaster": result.premaster_loudness.to_dict(),
                 "master": result.master_loudness.to_dict(),
             },
+            "quality": result.quality_report,
             "files": {
                 "master": f"/api/audio/jobs/{job.id}/files/master",
                 "rough": f"/api/audio/jobs/{job.id}/files/rough",

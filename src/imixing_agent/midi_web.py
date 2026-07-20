@@ -3105,6 +3105,7 @@ INDEX_HTML = """<!doctype html>
       const loudness = payload.loudness || {};
       const masterLoudness = loudness.master || {};
       const premasterLoudness = loudness.premaster || {};
+      const quality = payload.quality || {};
       const items = [
         [currentLanguage === "en" ? "Genre" : "Жанр", payload.genre],
         [currentLanguage === "en" ? "Stems" : "Дорожки", payload.stems.length],
@@ -3112,6 +3113,10 @@ INDEX_HTML = """<!doctype html>
         [currentLanguage === "en" ? "Premaster LUFS" : "LUFS до мастера", formatLoudness(premasterLoudness.integrated_lufs)],
         [currentLanguage === "en" ? "Master LUFS" : "LUFS мастера", formatLoudness(masterLoudness.integrated_lufs)],
         [currentLanguage === "en" ? "True peak" : "Истинный пик", formatTruePeak(masterLoudness.true_peak_dbtp)],
+        [currentLanguage === "en" ? "Short-term max" : "Кратковременная громкость", formatLoudness(masterLoudness.short_term_max_lufs)],
+        [currentLanguage === "en" ? "Loudness range" : "Диапазон громкости", Number.isFinite(masterLoudness.loudness_range_lu) ? `${masterLoudness.loudness_range_lu} LU` : "n/a"],
+        [currentLanguage === "en" ? "Dynamics" : "Динамика", Number.isFinite(masterLoudness.crest_factor_db) ? `${masterLoudness.crest_factor_db} dB crest` : "n/a"],
+        [currentLanguage === "en" ? "Quality check" : "Проверка качества", quality.status || "n/a"],
         [currentLanguage === "en" ? "Loudness method" : "Метод громкости", masterLoudness.method || (currentLanguage === "en" ? "unknown" : "неизвестно")],
         [currentLanguage === "en" ? "Master" : "Мастер", payload.filename],
         [currentLanguage === "en" ? "Roles" : "Роли", roles],
@@ -3119,6 +3124,11 @@ INDEX_HTML = """<!doctype html>
       audioStatsEl.innerHTML = items.map(([label, value]) => (
         `<div class="stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
       )).join("");
+      if (quality.recommendations && quality.recommendations.length) {
+        audioStatsEl.insertAdjacentHTML("beforeend", quality.recommendations.map((item) => (
+          `<div class="stat"><span>${currentLanguage === "en" ? "Recommendation" : "Рекомендация"}</span><strong>${escapeHtml(item)}</strong></div>`
+        )).join(""));
+      }
     }
 
     function formatLoudness(value) {
