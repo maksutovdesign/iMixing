@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from .audio_jobs import cleanup_audio_job, create_audio_job, get_audio_job, render_audio_job
 from .midi_fixer import (
+    EDITING_STRENGTHS,
     MidiFixOptions,
     fix_midi_bytes,
     list_instrument_family_names,
@@ -2017,6 +2018,15 @@ INDEX_HTML = """<!doctype html>
           </label>
 
           <label>
+            <span data-i18n="midi.strengthLabel">Сила правки</span>
+            <select id="editingStrength">
+              <option value="gentle" data-i18n="strength.gentle">Мягко · сохранить живое исполнение</option>
+              <option value="balanced" selected data-i18n="strength.balanced">Сбалансированно</option>
+              <option value="strong" data-i18n="strength.strong">Строго · ближе к сетке</option>
+            </select>
+          </label>
+
+          <label>
             <span data-i18n="midi.formatLabel">Формат вывода</span>
             <select id="outputFormat">
               <option value="1" data-i18n="format.ableton">Совместимый формат 1</option>
@@ -2413,6 +2423,7 @@ INDEX_HTML = """<!doctype html>
     const familyButtons = document.querySelectorAll(".family-chip[data-family]");
     const familyCopyEl = document.getElementById("familyCopy");
     const style = document.getElementById("style");
+    const editingStrength = document.getElementById("editingStrength");
     const outputFormat = document.getElementById("outputFormat");
     const includeTitles = document.getElementById("includeTitles");
     const tabButtons = document.querySelectorAll(".tab-button");
@@ -2456,6 +2467,7 @@ INDEX_HTML = """<!doctype html>
         "midi.dropCopy": "Или нажмите, чтобы выбрать файл. Лучше всего подходят обычные MIDI-партии из нотного редактора без редких служебных событий.",
         "midi.familyTitle": "Тип партии",
         "midi.styleLabel": "Музыкальный стиль",
+        "midi.strengthLabel": "Сила правки",
         "midi.formatLabel": "Формат вывода",
         "midi.includeTitles": "Добавлять названия треков в MIDI",
         "midi.submit": "Исправить и скачать",
@@ -2533,6 +2545,9 @@ INDEX_HTML = """<!doctype html>
         "style.classical": "Классика",
         "style.jazz": "Джаз",
         "style.pop": "Поп",
+        "strength.gentle": "Мягко · сохранить живое исполнение",
+        "strength.balanced": "Сбалансированно",
+        "strength.strong": "Строго · ближе к сетке",
         "format.ableton": "Совместимый формат 1",
         "format.plain": "Простой MIDI, формат 0",
         "genre.balanced": "Сбалансированный",
@@ -2665,6 +2680,7 @@ INDEX_HTML = """<!doctype html>
         "midi.dropCopy": "Or click to choose a file. Standard piano-roll MIDI works best; avoid exotic SysEx-heavy files.",
         "midi.familyTitle": "Instrument family",
         "midi.styleLabel": "Musical style",
+        "midi.strengthLabel": "Editing strength",
         "midi.formatLabel": "Output format",
         "midi.includeTitles": "Add track names to MIDI",
         "midi.submit": "Repair and download",
@@ -2742,6 +2758,9 @@ INDEX_HTML = """<!doctype html>
         "style.classical": "Classical",
         "style.jazz": "Jazz",
         "style.pop": "Pop",
+        "strength.gentle": "Gentle · preserve live feel",
+        "strength.balanced": "Balanced",
+        "strength.strong": "Strong · closer to grid",
         "format.ableton": "Ableton-safe format 1",
         "format.plain": "Plain MIDI, format 0",
         "genre.balanced": "Balanced",
@@ -3212,6 +3231,7 @@ INDEX_HTML = """<!doctype html>
       formData.append("file", currentFile);
       formData.append("instrument_family", currentFamily);
       formData.append("style", style.value);
+      formData.append("editing_strength", editingStrength.value);
       formData.append("output_format", outputFormat.value);
       formData.append("include_track_titles", includeTitles.checked ? "true" : "false");
 
@@ -4401,6 +4421,7 @@ async def fix_midi(
     file: UploadFile = File(...),
     instrument_family: str = Form("harmony"),
     style: str = Form("balanced"),
+    editing_strength: str = Form("balanced"),
     output_format: int = Form(1),
     include_track_titles: bool = Form(False),
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
@@ -4412,6 +4433,8 @@ async def fix_midi(
         raise HTTPException(status_code=400, detail="Unsupported instrument family.")
     if style not in list_style_names():
         raise HTTPException(status_code=400, detail="Unsupported style.")
+    if editing_strength not in EDITING_STRENGTHS:
+        raise HTTPException(status_code=400, detail="Unsupported editing strength.")
 
     payload = await file.read()
     if not payload:
@@ -4426,6 +4449,7 @@ async def fix_midi(
             options=MidiFixOptions(
                 style=style,
                 instrument_family=instrument_family,
+                editing_strength=editing_strength,
                 output_format=output_format,
                 include_track_titles=include_track_titles,
             ),

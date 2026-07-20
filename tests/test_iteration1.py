@@ -77,6 +77,21 @@ def build_midi_from_notes(notes: list[Note], title: str = "test") -> bytes:
 
 
 class MidiHardeningTests(unittest.TestCase):
+    def test_gentle_midi_fix_preserves_pitch_and_most_timing_expression(self) -> None:
+        source = build_midi_from_notes([Note(5, 101, 61, 105)], title="live_take")
+        result = fix_midi_bytes(
+            source,
+            source_name="live_take.mid",
+            options=MidiFixOptions(editing_strength="gentle", instrument_family="melody"),
+        )
+        edited = parse_midi_bytes(result.midi_bytes).notes
+
+        self.assertEqual(result.stats.editing_strength, "gentle")
+        self.assertTrue(result.stats.expression_preserved)
+        self.assertEqual(edited[0].pitch, 61)
+        self.assertLess(abs(edited[0].start - 5), 5)
+        self.assertEqual(edited[0].velocity, 105)
+
     def test_fix_midi_bytes_rejects_truncated_midi_as_value_error(self) -> None:
         bad_payloads = [
             b"MThd",

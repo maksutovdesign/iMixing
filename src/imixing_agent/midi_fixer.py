@@ -219,6 +219,7 @@ STYLE_PROFILES: dict[str, StyleProfile] = {
     ),
 }
 STYLE_NAMES = tuple(STYLE_PROFILES)
+EDITING_STRENGTHS = ("gentle", "balanced", "strong")
 
 
 @dataclass(frozen=True)
@@ -291,6 +292,7 @@ class VoiceCandidate:
 class MidiFixOptions:
     style: str = "balanced"
     instrument_family: str = "harmony"
+    editing_strength: str = "balanced"
     output_format: int = 1
     include_track_titles: bool = False
 
@@ -299,6 +301,8 @@ class MidiFixOptions:
 class MidiFixStats:
     style: str
     instrument_family: str
+    editing_strength: str
+    expression_preserved: bool
     detected_key_center: str
     quantize_grid: int
     output_format: int
@@ -662,6 +666,7 @@ def clean_notes(
     grid: int,
     tonal_center: TonalCenter,
     profile: StyleProfile,
+    editing_strength: str = "balanced",
 ) -> list[Note]:
     cleaned: list[Note] = []
     min_duration = grid if profile.slug != "classical" else grid
@@ -672,10 +677,10 @@ def clean_notes(
         if duration < max(1, grid // 2) or note.velocity == 0:
             continue
 
-        start = max(0, quantize(note.start, grid))
-        end = max(start + min_duration, quantize(note.end, grid))
-        pitch = snap_to_scale(note.pitch, tonal_center)
-        velocity = min(92, max(28, note.velocity))
+        start = max(0, _blend_quantize(note.start, grid, editing_strength))
+        end = max(start + min_duration, _blend_quantize(note.end, grid, editing_strength))
+        pitch = note.pitch if editing_strength == "gentle" else snap_to_scale(note.pitch, tonal_center)
+        velocity = _clean_velocity(note.velocity, editing_strength)
         cleaned.append(Note(start, end, pitch, velocity, note.channel))
 
     cleaned.sort(key=lambda note: (note.start, note.pitch, note.end))
@@ -697,6 +702,20 @@ def clean_notes(
                 continue
         merged.append(note)
     return merged
+
+
+def _blend_quantize(value: int, grid: int, strength: str) -> int:
+    snapped = quantize(value, grid)
+    amount = {"gentle": 0.35, "balanced": 1.0, "strong": 1.0}.get(strength, 1.0)
+    return int(round(value + (snapped - value) * amount))
+
+
+def _clean_velocity(velocity: int, strength: str) -> int:
+    if strength == "gentle":
+        return min(112, max(18, velocity))
+    if strength == "strong":
+        return min(100, max(24, velocity))
+    return min(92, max(28, velocity))
 
 
 def build_chromatic_chord_map(
@@ -1567,6 +1586,8 @@ def build_stats(
     return MidiFixStats(
         style=options.style,
         instrument_family=options.instrument_family,
+        editing_strength=options.editing_strength,
+        expression_preserved=options.editing_strength == "gentle",
         detected_key_center=tonal_center_label(tonal_center),
         quantize_grid=grid,
         output_format=options.output_format,
@@ -1588,6 +1609,8 @@ def fix_midi_bytes(
     options: MidiFixOptions | None = None,
 ) -> MidiFixResult:
     active_options = options or MidiFixOptions()
+    if active_options.editing_strength not in EDITING_STRENGTHS:
+        raise ValueError(f"Unsupported editing strength: {active_options.editing_strength}")
     style_profile = get_style_profile(active_options.style)
     instrument_profile = get_instrument_profile(active_options.instrument_family)
     profile = apply_instrument_profile(style_profile, instrument_profile)
@@ -1597,8 +1620,16 @@ def fix_midi_bytes(
 
     tonal_center = detect_tonal_center(parsed.notes)
     grid = choose_grid(parsed.notes, profile)
-    cleaned = clean_notes(parsed.notes, grid=grid, tonal_center=tonal_center, profile=profile)
-    if instrument_profile.voicing_mode == "melodic":
+    cleaned = clean_notes(
+        parsed.notes,
+        grid=grid,
+        tonal_center=tonal_center,
+        profile=profile,
+        editing_strength=active_options.editing_strength,
+    )
+    if active_options.editing_strength == "gentle":
+        edited = cleaned
+    elif instrument_profile.voicing_mode == "melodic":
         edited = extract_melody_texture(cleaned, division=parsed.division, grid=grid, profile=profile)
     else:
         edited = reharmonize_texture(
