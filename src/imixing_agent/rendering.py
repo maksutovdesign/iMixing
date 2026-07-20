@@ -178,7 +178,12 @@ def render_master(
     preset_name, preset = _genre_preset(genre)
     sample_rate = project.stems[0].metrics.sample_rate
     processed_stems = [_render_stem(stem, sample_rate, deps, preset) for stem in project.stems]
-    warnings = _attenuate_correlated_ambiguous_stems(project.stems, processed_stems, np)
+    warnings = []
+    if deps.get("simple_renderer"):
+        warnings.append(
+            "Using simple shared-hosting renderer because the full pedalboard/librosa chain is unavailable."
+        )
+    warnings.extend(_attenuate_correlated_ambiguous_stems(project.stems, processed_stems, np))
     mix = _sum_stems(processed_stems, np)
     premaster = _normalize_peak(mix, preset["premaster_peak_dbfs"], np)
     premaster_loudness = analyze_loudness(premaster, sample_rate, np)
@@ -211,9 +216,15 @@ def _load_audio_dependencies() -> dict[str, Any]:
         str(Path(tempfile.gettempdir()) / "imixing_numba_cache"),
     )
     try:
-        import librosa
         import numpy as np
         import soundfile as sf
+    except ImportError as error:
+        raise RuntimeError(
+            "Audio rendering requires numpy and soundfile from pyproject.toml. Run `pip install -e .`."
+        ) from error
+
+    try:
+        import librosa
         from pedalboard import (
             Compressor,
             Gain,
@@ -227,15 +238,19 @@ def _load_audio_dependencies() -> dict[str, Any]:
             Reverb,
         )
     except ImportError as error:
-        raise RuntimeError(
-            "Audio rendering requires dependencies from pyproject.toml. "
-            "Run `pip install -e .` and install FFmpeg separately for MP3 previews."
-        ) from error
+        return {
+            "librosa": None,
+            "np": np,
+            "sf": sf,
+            "simple_renderer": True,
+            "simple_renderer_reason": repr(error),
+        }
 
     return {
         "librosa": librosa,
         "np": np,
         "sf": sf,
+        "simple_renderer": False,
         "Compressor": Compressor,
         "Gain": Gain,
         "HighpassFilter": HighpassFilter,
@@ -271,9 +286,12 @@ def _render_stem(stem: StemPlan, target_sample_rate: int, deps: dict[str, Any], 
     audio = _to_stereo(audio, np)
 
     if source_sample_rate != target_sample_rate:
-        left = librosa.resample(audio[:, 0], orig_sr=source_sample_rate, target_sr=target_sample_rate)
-        right = librosa.resample(audio[:, 1], orig_sr=source_sample_rate, target_sr=target_sample_rate)
-        audio = np.column_stack([left, right]).astype(np.float32)
+        if librosa is not None:
+            left = librosa.resample(audio[:, 0], orig_sr=source_sample_rate, target_sr=target_sample_rate)
+            right = librosa.resample(audio[:, 1], orig_sr=source_sample_rate, target_sr=target_sample_rate)
+            audio = np.column_stack([left, right]).astype(np.float32)
+        else:
+            audio = _resample_linear(audio, source_sample_rate, target_sample_rate, np)
 
     settings = _settings_for_role(stem.role, preset)
     audio = _remove_dc(audio, np)
@@ -285,6 +303,9 @@ def _render_stem(stem: StemPlan, target_sample_rate: int, deps: dict[str, Any], 
 
 
 def _apply_track_board(audio, sample_rate: int, settings: dict[str, Any], deps: dict[str, Any]):
+    if deps.get("simple_renderer"):
+        return _apply_simple_track_processing(audio, sample_rate, settings, deps["np"])
+
     board = deps["Pedalboard"]()
     if highpass_hz := settings.get("highpass_hz"):
         board.append(deps["HighpassFilter"](cutoff_frequency_hz=highpass_hz))
@@ -314,6 +335,9 @@ def _apply_track_board(audio, sample_rate: int, settings: dict[str, Any], deps: 
 
 def _master_bus(audio, sample_rate: int, target: str, deps: dict[str, Any], preset: dict[str, Any]):
     np = deps["np"]
+    if deps.get("simple_renderer"):
+        return _simple_master_bus(audio, sample_rate, target, np)
+
     compression_board = deps["Pedalboard"](
         [
             deps["Compressor"](threshold_db=-18.0, ratio=1.6, attack_ms=25.0, release_ms=160.0),
@@ -328,6 +352,80 @@ def _master_bus(audio, sample_rate: int, target: str, deps: dict[str, Any], pres
     final_gain_db = target_lufs(target) - final_metrics.integrated_lufs
     loudness_matched = (limited * (10.0 ** (final_gain_db / 20.0))).astype(np.float32)
     return _constrain_true_peak(loudness_matched, sample_rate, -1.0, np).astype(np.float32)
+
+
+def _apply_simple_track_processing(audio, sample_rate: int, settings: dict[str, Any], np):
+    processed = audio
+    if highpass_hz := settings.get("highpass_hz"):
+        processed = _simple_highpass(processed, sample_rate, float(highpass_hz), np)
+    if lowpass_hz := settings.get("lowpass_hz"):
+        processed = _simple_lowpass(processed, sample_rate, float(lowpass_hz), np)
+    if settings.get("compressor"):
+        processed = _simple_soft_compress(processed, np)
+    if reverb := settings.get("reverb"):
+        processed = _simple_room(processed, float(reverb), np)
+    return processed.astype(np.float32)
+
+
+def _simple_master_bus(audio, sample_rate: int, target: str, np):
+    compressed = _simple_soft_compress(audio, np, drive=1.15)
+    metrics = analyze_loudness(compressed, sample_rate, np)
+    target_gain_db = max(-12.0, min(target_lufs(target) - metrics.integrated_lufs, 9.0))
+    gained = (compressed * (10.0 ** (target_gain_db / 20.0))).astype(np.float32)
+    limited = np.tanh(gained * 1.05).astype(np.float32)
+    final_metrics = analyze_loudness(limited, sample_rate, np)
+    final_gain_db = max(-6.0, min(target_lufs(target) - final_metrics.integrated_lufs, 6.0))
+    loudness_matched = (limited * (10.0 ** (final_gain_db / 20.0))).astype(np.float32)
+    return _constrain_true_peak(loudness_matched, sample_rate, -1.0, np).astype(np.float32)
+
+
+def _simple_soft_compress(audio, np, drive: float = 1.0):
+    return np.tanh(audio * drive).astype(np.float32)
+
+
+def _simple_room(audio, wet: float, np):
+    delay = max(1, min(audio.shape[0] - 1, int(0.045 * 44100)))
+    room = audio.copy()
+    room[delay:, :] += audio[:-delay, :] * min(0.18, wet * 1.4)
+    return _stabilize_stem_peak(room, -1.2, np)
+
+
+def _simple_highpass(audio, sample_rate: int, cutoff_hz: float, np):
+    if cutoff_hz <= 0 or audio.shape[0] < 2:
+        return audio.astype(np.float32)
+    rc = 1.0 / (2.0 * math.pi * cutoff_hz)
+    dt = 1.0 / float(sample_rate)
+    alpha = rc / (rc + dt)
+    output = np.zeros_like(audio, dtype=np.float32)
+    output[0, :] = audio[0, :]
+    for index in range(1, audio.shape[0]):
+        output[index, :] = alpha * (output[index - 1, :] + audio[index, :] - audio[index - 1, :])
+    return output.astype(np.float32)
+
+
+def _simple_lowpass(audio, sample_rate: int, cutoff_hz: float, np):
+    if cutoff_hz <= 0 or audio.shape[0] < 2:
+        return audio.astype(np.float32)
+    rc = 1.0 / (2.0 * math.pi * cutoff_hz)
+    dt = 1.0 / float(sample_rate)
+    alpha = dt / (rc + dt)
+    output = np.zeros_like(audio, dtype=np.float32)
+    output[0, :] = audio[0, :]
+    for index in range(1, audio.shape[0]):
+        output[index, :] = output[index - 1, :] + alpha * (audio[index, :] - output[index - 1, :])
+    return output.astype(np.float32)
+
+
+def _resample_linear(audio, source_sample_rate: int, target_sample_rate: int, np):
+    if source_sample_rate == target_sample_rate:
+        return audio.astype(np.float32)
+    duration = audio.shape[0] / float(source_sample_rate)
+    target_length = max(1, int(round(duration * target_sample_rate)))
+    source_positions = np.linspace(0.0, max(0, audio.shape[0] - 1), num=audio.shape[0])
+    target_positions = np.linspace(0.0, max(0, audio.shape[0] - 1), num=target_length)
+    left = np.interp(target_positions, source_positions, audio[:, 0])
+    right = np.interp(target_positions, source_positions, audio[:, 1])
+    return np.column_stack([left, right]).astype(np.float32)
 
 
 def _sum_stems(stems: list[Any], np):
