@@ -37,6 +37,7 @@ def _analyze_wav_with_soundfile(path: Path) -> AudioMetrics:
             square_sum = 0.0
             sample_count = 0
             clipping_samples = 0
+            analysis_sample = None
 
             while True:
                 chunk = audio_file.read(CHUNK_FRAMES, dtype="float32", always_2d=True)
@@ -47,6 +48,8 @@ def _analyze_wav_with_soundfile(path: Path) -> AudioMetrics:
                 square_sum += float(np.sum(chunk * chunk))
                 sample_count += int(chunk.size)
                 clipping_samples += int(np.count_nonzero(abs_chunk >= 0.999))
+                if analysis_sample is None:
+                    analysis_sample = chunk[: min(len(chunk), 131_072)].copy()
     except Exception as error:  # noqa: BLE001
         raise ValueError(f"Invalid or corrupted WAV file: {path.name}") from error
 
@@ -57,6 +60,7 @@ def _analyze_wav_with_soundfile(path: Path) -> AudioMetrics:
     peak_dbfs = _ratio_to_db(peak)
     rms_dbfs = _ratio_to_db(rms)
     duration = frame_count / sample_rate if sample_rate else 0.0
+    spectral = _spectral_metrics(analysis_sample, sample_rate, np)
 
     return AudioMetrics(
         path=str(path),
@@ -69,6 +73,7 @@ def _analyze_wav_with_soundfile(path: Path) -> AudioMetrics:
         rms_dbfs=round(rms_dbfs, 2),
         estimated_headroom_db=round(abs(peak_dbfs), 2),
         clipping_samples=clipping_samples,
+        **spectral,
     )
 
 
@@ -86,6 +91,51 @@ def _bit_depth_from_subtype(subtype: Any) -> int:
         if marker in normalized:
             return bit_depth
     return 0
+
+
+def _spectral_metrics(audio, sample_rate: int, np) -> dict[str, float | None]:
+    if audio is None or len(audio) < 64 or not sample_rate:
+        return {
+            "spectral_centroid_hz": None,
+            "low_band_ratio": None,
+            "mid_band_ratio": None,
+            "high_band_ratio": None,
+            "stereo_correlation": None,
+        }
+
+    mono = np.mean(audio, axis=1)
+    window = np.hanning(len(mono))
+    spectrum = np.abs(np.fft.rfft(mono * window)) ** 2
+    frequencies = np.fft.rfftfreq(len(mono), 1.0 / sample_rate)
+    total = float(np.sum(spectrum))
+    if total <= 1e-12:
+        return {
+            "spectral_centroid_hz": 0.0,
+            "low_band_ratio": 0.0,
+            "mid_band_ratio": 0.0,
+            "high_band_ratio": 0.0,
+            "stereo_correlation": None,
+        }
+
+    def band_ratio(low: float, high: float) -> float:
+        mask = (frequencies >= low) & (frequencies < high)
+        return round(float(np.sum(spectrum[mask]) / total), 3)
+
+    correlation = None
+    if audio.shape[1] >= 2:
+        left = audio[:, 0] - float(np.mean(audio[:, 0]))
+        right = audio[:, 1] - float(np.mean(audio[:, 1]))
+        denominator = float(np.sqrt(np.mean(left * left)) * np.sqrt(np.mean(right * right)))
+        if denominator > 1e-9:
+            correlation = round(float(np.mean(left * right) / denominator), 3)
+
+    return {
+        "spectral_centroid_hz": round(float(np.sum(frequencies * spectrum) / total), 1),
+        "low_band_ratio": band_ratio(20.0, 180.0),
+        "mid_band_ratio": band_ratio(180.0, 4000.0),
+        "high_band_ratio": band_ratio(4000.0, sample_rate / 2.0),
+        "stereo_correlation": correlation,
+    }
 
 
 def _analyze_wav_with_wave(path: Path) -> AudioMetrics:

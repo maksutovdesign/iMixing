@@ -124,8 +124,8 @@ def build_project(input_dir: Path, mastering_target: str) -> MixProject:
 
 
 def _build_stem_plan(path: Path) -> StemPlan:
-    role = classify_stem(path)
     metrics = analyze_wav(path)
+    role = classify_stem(path, metrics)
     warnings = _warnings_for(metrics)
 
     return StemPlan(

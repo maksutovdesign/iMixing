@@ -185,6 +185,7 @@ def render_master(
             "Using simple shared-hosting renderer because the full pedalboard/librosa chain is unavailable."
         )
     warnings.extend(_attenuate_correlated_ambiguous_stems(project.stems, processed_stems, np))
+    warnings.extend(_apply_genre_aware_low_end_control(project.stems, processed_stems, sample_rate, preset_name, np))
     mix = _sum_stems(processed_stems, np)
     premaster = _normalize_peak(mix, preset["premaster_peak_dbfs"], np)
     premaster_loudness = analyze_loudness(premaster, sample_rate, np)
@@ -438,6 +439,38 @@ def _sum_stems(stems: list[Any], np):
     for stem in stems:
         mix[: stem.shape[0], :] += stem
     return mix
+
+
+def _apply_genre_aware_low_end_control(stems: list[StemPlan], rendered: list[Any], sample_rate: int, genre: str, np) -> list[str]:
+    """Gently duck bass from kick transients only in genres where this is expected."""
+    if genre not in {"edm", "rap"}:
+        return []
+    kick_index = next((index for index, stem in enumerate(stems) if stem.role == "kick"), None)
+    bass_index = next((index for index, stem in enumerate(stems) if stem.role == "bass"), None)
+    if kick_index is None or bass_index is None:
+        return []
+    kick_metrics = stems[kick_index].metrics
+    bass_metrics = stems[bass_index].metrics
+    if (kick_metrics.low_band_ratio or 0.0) < 0.25 or (bass_metrics.low_band_ratio or 0.0) < 0.25:
+        return []
+
+    kick = rendered[kick_index]
+    bass = rendered[bass_index]
+    length = min(len(kick), len(bass))
+    if length < 2:
+        return []
+    trigger = np.mean(np.abs(kick[:length]), axis=1)
+    reference = float(np.percentile(trigger, 95))
+    if reference <= 1e-7:
+        return []
+    trigger = np.clip(trigger / reference, 0.0, 1.0)
+    release_samples = max(1, int(sample_rate * 0.07))
+    envelope = np.convolve(trigger, np.ones(release_samples, dtype=np.float32) / release_samples, mode="same")
+    gain = 1.0 - np.clip(envelope, 0.0, 1.0)[:, None] * 0.18
+    adjusted = bass.copy()
+    adjusted[:length] *= gain
+    rendered[bass_index] = adjusted.astype(np.float32)
+    return ["Applied gentle genre-aware kick/bass control (maximum 1.7 dB bass reduction)."]
 
 
 def _to_stereo(audio, np):

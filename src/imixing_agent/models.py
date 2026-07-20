@@ -17,6 +17,11 @@ class AudioMetrics:
     rms_dbfs: float
     estimated_headroom_db: float
     clipping_samples: int
+    spectral_centroid_hz: float | None = None
+    low_band_ratio: float | None = None
+    mid_band_ratio: float | None = None
+    high_band_ratio: float | None = None
+    stereo_correlation: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -38,6 +38,8 @@ from imixing_agent import cli
 from imixing_agent.audio_jobs import cleanup_audio_job
 from imixing_agent.audio_analysis import analyze_wav
 from imixing_agent.loudness import target_true_peak_dbtp
+from imixing_agent.quality import detect_mix_conflicts
+from imixing_agent.stem_classifier import classify_stem
 from imixing_agent.midi_fixer import MidiFixOptions, Note, fix_midi_bytes, parse_midi_bytes, render_midi_bytes
 from imixing_agent.midi_web import app, resolve_host_port
 from imixing_agent.mix_strategy import build_project
@@ -182,6 +184,26 @@ class AudioHardeningTests(unittest.TestCase):
             self.assertEqual(len(project.stems), 2)
             self.assertTrue(result.master_path.exists())
 
+    def test_signal_analysis_classifies_unnamed_low_end_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            path = Path(temp_root) / "audio_001.wav"
+            write_sine_wav(path, freq=70.0)
+            metrics = analyze_wav(path)
+
+        self.assertIsNotNone(metrics.spectral_centroid_hz)
+        self.assertGreater(metrics.low_band_ratio or 0.0, 0.9)
+        self.assertEqual(classify_stem(path, metrics), "bass")
+
+    def test_mix_quality_detects_kick_bass_masking_risk(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            write_sine_wav(root / "kick.wav", freq=60.0)
+            write_sine_wav(root / "bass.wav", freq=80.0)
+            project = build_project(root, "streaming:-14LUFS:-1dBTP")
+
+        conflicts = detect_mix_conflicts(project)
+        self.assertTrue(any(item["type"] == "low_end_masking" for item in conflicts))
+
 
 class WebEndpointTests(unittest.TestCase):
     def wait_for_audio_job(self, client: TestClient, job_id: str) -> dict:
@@ -248,6 +270,7 @@ class WebEndpointTests(unittest.TestCase):
                 self.assertIn("loudness", job["result"])
                 self.assertIn("quality", job["result"])
                 self.assertIn("status", job["result"]["quality"])
+                self.assertIn("mix_conflicts", job["result"]["quality"])
 
                 master_response = client.get(job["result"]["files"]["master"])
                 analysis_response = client.get(job["result"]["files"]["analysis"])
