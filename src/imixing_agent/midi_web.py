@@ -10,6 +10,7 @@ from fastapi import BackgroundTasks, Body, Cookie, FastAPI, File, Form, HTTPExce
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from .audio_jobs import cleanup_audio_job, create_audio_job, get_audio_job, render_audio_job
+from .midi_generator import MidiGenerationOptions, generate_midi, list_generator_styles
 from .midi_fixer import (
     EDITING_STRENGTHS,
     MidiFixOptions,
@@ -1966,8 +1967,13 @@ INDEX_HTML = """<!doctype html>
         <span class="tab-label" data-i18n="tabs.audio">Сведение и мастеринг</span>
         <span class="tab-meta" data-i18n="tabs.audioMeta">дорожки · LUFS · мастер WAV</span>
       </button>
-      <button class="tab-button" type="button" data-tab="pricingPanel">
+      <button class="tab-button" type="button" data-tab="generatorPanel">
         <span class="tab-index">03</span>
+        <span class="tab-label" data-i18n="tabs.generator">MIDI Generator</span>
+        <span class="tab-meta" data-i18n="tabs.generatorMeta">бас · мелодия · драм-машина</span>
+      </button>
+      <button class="tab-button" type="button" data-tab="pricingPanel">
+        <span class="tab-index">04</span>
         <span class="tab-label" data-i18n="tabs.pricing">Тарифы</span>
         <span class="tab-meta" data-i18n="tabs.pricingMeta">баллы · планы · лимиты</span>
       </button>
@@ -2152,6 +2158,36 @@ INDEX_HTML = """<!doctype html>
         </ul>
       </div>
     </section>
+    </section>
+
+    <section class="panel" id="generatorPanel">
+      <section class="grid">
+        <div class="card">
+          <div class="pill" data-i18n="generator.pill">Музыкальные правила · MIDI до 10 минут</div>
+          <div class="controls">
+            <label><span data-i18n="generator.style">Стиль</span><select id="generatorStyle"><option value="pop">Pop</option><option value="rap">Rap</option><option value="trap">Trap</option><option value="house">House</option><option value="techno">Techno</option><option value="edm">EDM</option><option value="rock">Rock</option><option value="cinematic">Cinematic</option><option value="jazz">Jazz</option></select></label>
+            <label><span data-i18n="generator.key">Тональность</span><select id="generatorKey"><option>C</option><option>C#</option><option>D</option><option>Eb</option><option>E</option><option>F</option><option>F#</option><option>G</option><option>Ab</option><option>A</option><option>Bb</option><option>B</option></select></label>
+            <label><span data-i18n="generator.scale">Лад</span><select id="generatorScale"><option value="minor" data-i18n="generator.minor">Минор</option><option value="major" data-i18n="generator.major">Мажор</option></select></label>
+            <label><span data-i18n="generator.bpm">BPM</span><input id="generatorBpm" type="number" min="40" max="240" value="120"></label>
+            <label><span data-i18n="generator.duration">Длительность, секунд</span><input id="generatorDuration" type="number" min="4" max="600" value="60"></label>
+            <label><span data-i18n="generator.swing">Swing</span><input id="generatorSwing" type="number" min="0" max="0.5" step="0.01" value="0.08"></label>
+            <label><span data-i18n="generator.humanize">Humanize</span><input id="generatorHumanize" type="number" min="0" max="1" step="0.01" value="0.15"></label>
+            <label><span data-i18n="generator.density">Плотность</span><input id="generatorDensity" type="number" min="0.1" max="1" step="0.05" value="0.65"></label>
+            <label><span data-i18n="generator.seed">Seed</span><input id="generatorSeed" type="number" placeholder="авто"></label>
+            <label><span data-i18n="generator.motif">Мотив / ноты MIDI</span><input id="generatorMotif" type="text" placeholder="60, 64, 67"></label>
+            <label class="checkbox"><input id="generatorBass" type="checkbox" checked><span data-i18n="generator.bass">Bassline</span></label>
+            <label class="checkbox"><input id="generatorMelody" type="checkbox" checked><span data-i18n="generator.melody">Melody</span></label>
+            <label class="checkbox"><input id="generatorDrums" type="checkbox" checked><span data-i18n="generator.drums">Drum machine</span></label>
+            <button id="captureMidiButton" type="button" class="secondary-button" data-i18n="generator.capture">Записать ноты с MIDI-клавиатуры</button>
+            <button id="generatorSubmitButton" type="button" data-i18n="generator.submit">Сгенерировать и скачать MIDI</button>
+            <div class="status" id="generatorStatus" data-i18n="generator.statusEmpty">Выберите характер будущей партии.</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="stats" id="generatorStats"></div>
+          <p class="hint" data-i18n="generator.hint">Генератор создаёт воспроизводимый MIDI по музыкальным правилам. Seed позволяет получить тот же результат, а ввод MIDI-нот задаёт мотив для мелодии. Для физической MIDI-клавиатуры нажмите кнопку записи и сыграйте ноты.</p>
+        </div>
+      </section>
     </section>
 
     <section class="panel" id="audioPanel">
@@ -2426,6 +2462,23 @@ INDEX_HTML = """<!doctype html>
     const editingStrength = document.getElementById("editingStrength");
     const outputFormat = document.getElementById("outputFormat");
     const includeTitles = document.getElementById("includeTitles");
+    const generatorStyle = document.getElementById("generatorStyle");
+    const generatorKey = document.getElementById("generatorKey");
+    const generatorScale = document.getElementById("generatorScale");
+    const generatorBpm = document.getElementById("generatorBpm");
+    const generatorDuration = document.getElementById("generatorDuration");
+    const generatorSwing = document.getElementById("generatorSwing");
+    const generatorHumanize = document.getElementById("generatorHumanize");
+    const generatorDensity = document.getElementById("generatorDensity");
+    const generatorSeed = document.getElementById("generatorSeed");
+    const generatorMotif = document.getElementById("generatorMotif");
+    const generatorBass = document.getElementById("generatorBass");
+    const generatorMelody = document.getElementById("generatorMelody");
+    const generatorDrums = document.getElementById("generatorDrums");
+    const generatorSubmitButton = document.getElementById("generatorSubmitButton");
+    const generatorStatus = document.getElementById("generatorStatus");
+    const generatorStats = document.getElementById("generatorStats");
+    const captureMidiButton = document.getElementById("captureMidiButton");
     const tabButtons = document.querySelectorAll(".tab-button");
     const panels = document.querySelectorAll(".panel");
     const languageButtons = document.querySelectorAll(".language-button[data-lang]");
@@ -2457,6 +2510,8 @@ INDEX_HTML = """<!doctype html>
         "tabs.midiMeta": "правка · гармония · экспорт",
         "tabs.audio": "Сведение и мастеринг",
         "tabs.audioMeta": "дорожки · LUFS · мастер WAV",
+        "tabs.generator": "MIDI Generator",
+        "tabs.generatorMeta": "бас · мелодия · драм-машина",
         "tabs.pricing": "Тарифы",
         "tabs.pricingMeta": "баллы · планы · лимиты",
         "midi.pill": "Перетащить · исправить · скачать",
@@ -2472,6 +2527,15 @@ INDEX_HTML = """<!doctype html>
         "midi.includeTitles": "Добавлять названия треков в MIDI",
         "midi.submit": "Исправить и скачать",
         "midi.statusEmpty": "Файл ещё не выбран.",
+        "generator.pill": "Музыкальные правила · MIDI до 10 минут",
+        "generator.style": "Стиль", "generator.key": "Тональность", "generator.scale": "Лад",
+        "generator.minor": "Минор", "generator.major": "Мажор", "generator.bpm": "BPM",
+        "generator.duration": "Длительность, секунд", "generator.swing": "Swing", "generator.humanize": "Humanize",
+        "generator.density": "Плотность", "generator.seed": "Seed", "generator.motif": "Мотив / ноты MIDI",
+        "generator.bass": "Bassline", "generator.melody": "Melody", "generator.drums": "Drum machine",
+        "generator.capture": "Записать ноты с MIDI-клавиатуры", "generator.submit": "Сгенерировать и скачать MIDI",
+        "generator.statusEmpty": "Выберите характер будущей партии.",
+        "generator.hint": "Генератор создаёт воспроизводимый MIDI по музыкальным правилам. Seed позволяет получить тот же результат, а ввод MIDI-нот задаёт мотив для мелодии. Для физической MIDI-клавиатуры нажмите кнопку записи и сыграйте ноты.",
         "midi.ready": "Готово к обработке.",
         "midi.processing": "Исправляю MIDI...",
         "midi.pickFirst": "Сначала выберите MIDI-файл.",
@@ -2670,6 +2734,8 @@ INDEX_HTML = """<!doctype html>
         "tabs.midiMeta": "repair · harmony · export",
         "tabs.audio": "Mix & Master",
         "tabs.audioMeta": "stems · LUFS · master.wav",
+        "tabs.generator": "MIDI Generator",
+        "tabs.generatorMeta": "bass · melody · drum machine",
         "tabs.pricing": "Pricing",
         "tabs.pricingMeta": "credits · plans · limits",
         "midi.pill": "Drag, drop, repair",
@@ -2685,6 +2751,15 @@ INDEX_HTML = """<!doctype html>
         "midi.includeTitles": "Add track names to MIDI",
         "midi.submit": "Repair and download",
         "midi.statusEmpty": "No file selected yet.",
+        "generator.pill": "Musical rules · MIDI up to 10 minutes",
+        "generator.style": "Style", "generator.key": "Key", "generator.scale": "Scale",
+        "generator.minor": "Minor", "generator.major": "Major", "generator.bpm": "BPM",
+        "generator.duration": "Duration, seconds", "generator.swing": "Swing", "generator.humanize": "Humanize",
+        "generator.density": "Density", "generator.seed": "Seed", "generator.motif": "Motif / MIDI notes",
+        "generator.bass": "Bassline", "generator.melody": "Melody", "generator.drums": "Drum machine",
+        "generator.capture": "Capture from MIDI keyboard", "generator.submit": "Generate and download MIDI",
+        "generator.statusEmpty": "Choose the character of the future part.",
+        "generator.hint": "The generator creates repeatable MIDI using musical rules. Seed reproduces the same result, and MIDI notes provide a melody motif. Press capture and play notes on a physical MIDI keyboard.",
         "midi.ready": "Ready to process.",
         "midi.processing": "Repairing MIDI...",
         "midi.pickFirst": "Choose a MIDI file first.",
@@ -3296,6 +3371,52 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
+    function renderGeneratorStats(stats) {
+      const counts = stats.note_counts || {};
+      const items = [
+        [currentLanguage === "en" ? "Length" : "Длительность", `${stats.duration_seconds}s · ${stats.bars} bars`],
+        ["BPM", stats.bpm],
+        [currentLanguage === "en" ? "Key" : "Тональность", stats.key],
+        [currentLanguage === "en" ? "Style" : "Стиль", stats.style],
+        [currentLanguage === "en" ? "Notes" : "Ноты", `Bass ${counts.bass || 0} · Melody ${counts.melody || 0} · Drums ${counts.drums || 0}`],
+        ["Seed", stats.seed],
+      ];
+      generatorStats.innerHTML = items.map(([label, value]) => `<div class="stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+    }
+
+    async function submitGenerator() {
+      if (!canSpendCredits(1, generatorStatus, currentLanguage === "en" ? "MIDI Generator" : "MIDI Generator")) return;
+      const parts = [generatorBass.checked && "bass", generatorMelody.checked && "melody", generatorDrums.checked && "drums"].filter(Boolean);
+      if (!parts.length) { generatorStatus.textContent = currentLanguage === "en" ? "Choose at least one part." : "Выберите хотя бы одну партию."; return; }
+      generatorSubmitButton.disabled = true;
+      generatorStatus.textContent = currentLanguage === "en" ? "Generating musical parts..." : "Генерирую музыкальные партии...";
+      const formData = new FormData();
+      formData.append("style", generatorStyle.value); formData.append("key", generatorKey.value); formData.append("scale", generatorScale.value);
+      formData.append("bpm", generatorBpm.value); formData.append("duration_seconds", generatorDuration.value);
+      formData.append("swing", generatorSwing.value); formData.append("humanize", generatorHumanize.value); formData.append("density", generatorDensity.value);
+      formData.append("parts", parts.join(",")); formData.append("motif", generatorMotif.value);
+      if (generatorSeed.value) formData.append("seed", generatorSeed.value);
+      try {
+        const response = await fetch("/api/midi/generate", { method: "POST", body: formData });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "Generator failed.");
+        downloadBase64Midi(payload.filename, payload.midi_base64);
+        renderGeneratorStats(payload.stats); setCredits(payload.credits_remaining ?? creditBalance - 1);
+        generatorSeed.value = payload.stats.seed; generatorStatus.textContent = currentLanguage === "en" ? `Done. Downloaded ${payload.filename}.` : `Готово. Скачан файл ${payload.filename}.`;
+      } catch (error) { generatorStatus.textContent = error.message || "Generator error."; }
+      finally { generatorSubmitButton.disabled = false; }
+    }
+
+    async function captureMidiMotif() {
+      if (!navigator.requestMIDIAccess) { generatorStatus.textContent = currentLanguage === "en" ? "Web MIDI is not available in this browser." : "Web MIDI недоступен в этом браузере."; return; }
+      try {
+        const access = await navigator.requestMIDIAccess();
+        const captured = [];
+        access.inputs.forEach((input) => { input.onmidimessage = (event) => { const [status, note, velocity] = event.data; if ((status & 0xf0) === 0x90 && velocity && !captured.includes(note)) { captured.push(note); generatorMotif.value = captured.join(", "); generatorStatus.textContent = `${captured.length} MIDI note(s) captured.`; } }; });
+        generatorStatus.textContent = currentLanguage === "en" ? "Listening for MIDI notes..." : "Слушаю MIDI-клавиатуру...";
+      } catch (error) { generatorStatus.textContent = currentLanguage === "en" ? "MIDI permission was not granted." : "Доступ к MIDI-клавиатуре не получен."; }
+    }
+
     fileInput.addEventListener("change", (event) => {
       setFile(event.target.files && event.target.files[0] ? event.target.files[0] : null);
     });
@@ -3315,6 +3436,8 @@ INDEX_HTML = """<!doctype html>
     style.addEventListener("change", () => {
       styleTouched = true;
     });
+    generatorSubmitButton.addEventListener("click", submitGenerator);
+    captureMidiButton.addEventListener("click", captureMidiMotif);
 
     dropzone.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -4467,6 +4590,49 @@ async def fix_midi(
         "midi_base64": base64.b64encode(result.midi_bytes).decode("ascii"),
         "credits_remaining": credits_remaining,
     }
+
+
+@app.post("/api/midi/generate")
+async def generate_midi_endpoint(
+    response: Response,
+    style: str = Form("pop"),
+    key: str = Form("C"),
+    scale: str = Form("minor"),
+    bpm: int = Form(120),
+    duration_seconds: int = Form(60),
+    swing: float = Form(0.0),
+    humanize: float = Form(0.15),
+    density: float = Form(0.6),
+    parts: str = Form("bass,melody,drums"),
+    seed: int | None = Form(None),
+    motif: str = Form(""),
+    credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
+) -> dict[str, object]:
+    if style not in list_generator_styles():
+        raise HTTPException(status_code=400, detail="Unsupported generator style.")
+    try:
+        result = generate_midi(
+            MidiGenerationOptions(
+                style=style,
+                key=key,
+                scale=scale,
+                bpm=bpm,
+                duration_seconds=duration_seconds,
+                swing=swing,
+                humanize=humanize,
+                density=density,
+                parts=tuple(part.strip() for part in parts.split(",") if part.strip()),
+                seed=seed,
+                motif=motif,
+            )
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    credits_remaining = _spend_credits(response, credit_session, MIDI_CREDIT_COST, "MIDI Generator")
+    track_event(logger, settings, "midi_generated", style=style, bpm=bpm, duration_seconds=duration_seconds)
+    payload = result.to_api_dict()
+    payload["credits_remaining"] = credits_remaining
+    return payload
 
 
 @app.post("/api/audio/mix", status_code=202)

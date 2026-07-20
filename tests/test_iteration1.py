@@ -41,6 +41,7 @@ from imixing_agent.loudness import target_true_peak_dbtp
 from imixing_agent.quality import detect_mix_conflicts
 from imixing_agent.stem_classifier import classify_stem
 from imixing_agent.midi_fixer import MidiFixOptions, Note, fix_midi_bytes, parse_midi_bytes, render_midi_bytes
+from imixing_agent.midi_generator import MidiGenerationOptions, generate_midi
 from imixing_agent.midi_web import app, resolve_host_port
 from imixing_agent.mix_strategy import build_project
 from imixing_agent.rendering import render_master
@@ -77,6 +78,18 @@ def build_midi_from_notes(notes: list[Note], title: str = "test") -> bytes:
 
 
 class MidiHardeningTests(unittest.TestCase):
+    def test_midi_generator_creates_all_parts_and_supports_ten_minutes(self) -> None:
+        result = generate_midi(
+            MidiGenerationOptions(duration_seconds=600, bpm=120, style="house", key="Eb", seed=42)
+        )
+        parsed = parse_midi_bytes(result.midi_bytes)
+
+        self.assertEqual(result.stats["bars"], 300)
+        self.assertGreater(result.stats["note_counts"]["bass"], 0)
+        self.assertGreater(result.stats["note_counts"]["melody"], 0)
+        self.assertGreater(result.stats["note_counts"]["drums"], 0)
+        self.assertIn(9, {note.channel for note in parsed.notes})
+
     def test_gentle_midi_fix_preserves_pitch_and_most_timing_expression(self) -> None:
         source = build_midi_from_notes([Note(5, 101, 61, 105)], title="live_take")
         result = fix_midi_bytes(
@@ -221,6 +234,32 @@ class AudioHardeningTests(unittest.TestCase):
 
 
 class WebEndpointTests(unittest.TestCase):
+    def test_midi_generator_endpoint_returns_downloadable_midi(self) -> None:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/midi/generate",
+                data={
+                    "style": "trap",
+                    "key": "Eb",
+                    "scale": "minor",
+                    "bpm": "140",
+                    "duration_seconds": "16",
+                    "swing": "0.12",
+                    "humanize": "0.2",
+                    "density": "0.7",
+                    "parts": "bass,melody,drums",
+                    "seed": "123",
+                    "motif": "60,63,67",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["filename"].endswith(".mid"))
+        self.assertTrue(payload["midi_base64"])
+        self.assertEqual(payload["stats"]["key"], "Eb minor")
+        self.assertGreater(payload["stats"]["note_counts"]["drums"], 0)
+
     def wait_for_audio_job(self, client: TestClient, job_id: str) -> dict:
         payload = {}
         for _ in range(20):

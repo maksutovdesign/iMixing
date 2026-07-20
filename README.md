@@ -20,6 +20,7 @@ Core product directions:
 
 - `Mix & Master`: upload separated WAV stems, detect track roles, analyze levels and clipping, render a processed stereo mix, apply a basic master bus, and export `master.wav`.
 - `MIDI Doctor`: upload `.mid` or `.midi`, choose a musical profile, repair timing, voicing density, note ranges, velocity, weak notes, and DAW compatibility.
+- `MIDI Generator`: create rule-based basslines, melodies, and drum-machine MIDI up to 10 minutes long, with style, key, scale, BPM, swing, humanize, density, motif, seed, and physical MIDI-keyboard capture controls.
 
 Primary audience:
 
@@ -129,6 +130,26 @@ The MIDI fixer currently focuses on:
 - smoother voice leading between chord states
 - fewer bad doublings of unstable extensions
 - DAW-friendly MIDI export defaults
+
+## MIDI Generator
+
+The web app also includes a `MIDI Generator` tab. It creates a repeatable MIDI arrangement with bass, melody, and GM drum-machine notes on separate MIDI channels.
+
+- Duration: 4 seconds to 10 minutes.
+- Tempo: 40–240 BPM.
+- Styles: pop, rap, trap, house, techno, EDM, rock, cinematic, and jazz.
+- Controls: key, major/minor scale, swing, humanize, density, seed, selected parts, and optional motif as MIDI note numbers such as `60, 64, 67`.
+- Web MIDI: a physical MIDI keyboard can supply notes for the melody motif in supported browsers.
+
+The generation engine is rule-based: chord progressions drive bass roots and melody anchor tones, while drum patterns adapt to the selected style. `Seed` makes a result reproducible.
+
+API endpoint:
+
+```text
+POST /api/midi/generate
+```
+
+See [MIDI Generator product specification](docs/MIDI_GENERATOR.md) for rules and current scope.
 
 ### Telegram Bot
 
