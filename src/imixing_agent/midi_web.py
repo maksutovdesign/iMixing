@@ -1930,6 +1930,24 @@ INDEX_HTML = """<!doctype html>
         height: auto;
       }
     }
+
+    /* Generator 2.0 shows MIDI only after the API returns actual notes. */
+    .generator-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 20px; }
+    .generator-preset { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: #0b0b0b; color: var(--muted); box-shadow: none; font-size: 11px; }
+    .generator-preset.active, .generator-preset:hover:not(:disabled) { background: rgba(240,50,50,.1); border-color: var(--accent); color: var(--ink); }
+    .generator-result-card { min-height: 420px; }
+    .generator-result-head, .generator-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .generator-result-head h2 { margin: 6px 0 18px; font-size: 25px; letter-spacing: -.04em; }
+    .result-kicker { color: var(--accent); font-family: "IBM Plex Mono", "Noto Sans Mono", ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .generator-result-state { padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; text-transform: uppercase; }
+    .generator-preview { display: grid; gap: 12px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .generator-preview-head { color: var(--muted); font-size: 12px; }
+    .generator-roll { position: relative; min-height: 220px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background-color: #090909; background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(12.5% - 1px), #272727 calc(12.5% - 1px), #272727 12.5%), repeating-linear-gradient(to bottom, transparent 0, transparent 27px, #222 27px, #222 28px); }
+    .generator-note { position: absolute; min-width: 2px; border-radius: 2px; background: var(--accent); opacity: .92; }
+    .generator-note.drum { background: #a92a2a; }.generator-note.bass { background: #ff5a5a; }
+    .generator-preview-actions { grid-template-columns: repeat(3, 1fr); }
+    .generator-preview-actions .secondary-button { min-height: 42px; padding: 10px; }
+    @media (max-width: 780px) { .generator-preview-actions { grid-template-columns: 1fr; }.generator-result-head h2 { font-size: 22px; } }
   </style>
 </head>
 <body>
@@ -2164,6 +2182,12 @@ INDEX_HTML = """<!doctype html>
       <section class="grid">
         <div class="card">
           <div class="pill" data-i18n="generator.pill">Музыкальные правила · MIDI до 10 минут</div>
+          <div class="generator-presets" aria-label="Пресеты генератора">
+            <button type="button" class="generator-preset active" data-style="pop" data-key="C" data-scale="minor" data-bpm="120" data-swing="0.08" data-density="0.65">Pop hook</button>
+            <button type="button" class="generator-preset" data-style="trap" data-key="Eb" data-scale="minor" data-bpm="140" data-swing="0.12" data-density="0.72">Trap dark</button>
+            <button type="button" class="generator-preset" data-style="house" data-key="A" data-scale="minor" data-bpm="124" data-swing="0.04" data-density="0.7">House groove</button>
+            <button type="button" class="generator-preset" data-style="cinematic" data-key="D" data-scale="minor" data-bpm="92" data-swing="0" data-density="0.48">Cinematic</button>
+          </div>
           <div class="controls">
             <label><span data-i18n="generator.style">Стиль</span><select id="generatorStyle"><option value="pop">Pop</option><option value="rap">Rap</option><option value="trap">Trap</option><option value="house">House</option><option value="techno">Techno</option><option value="edm">EDM</option><option value="rock">Rock</option><option value="cinematic">Cinematic</option><option value="jazz">Jazz</option></select></label>
             <label><span data-i18n="generator.key">Тональность</span><select id="generatorKey"><option>C</option><option>C#</option><option>D</option><option>Eb</option><option>E</option><option>F</option><option>F#</option><option>G</option><option>Ab</option><option>A</option><option>Bb</option><option>B</option></select></label>
@@ -2183,8 +2207,24 @@ INDEX_HTML = """<!doctype html>
             <div class="status" id="generatorStatus" data-i18n="generator.statusEmpty">Выберите характер будущей партии.</div>
           </div>
         </div>
-        <div class="card">
+        <div class="card generator-result-card">
+          <div class="generator-result-head">
+            <div>
+              <div class="result-kicker">MIDI output</div>
+              <h2>Результат генерации</h2>
+            </div>
+            <span class="generator-result-state" id="generatorResultState">ожидание</span>
+          </div>
           <div class="stats" id="generatorStats"></div>
+          <section class="generator-preview" id="generatorPreview" aria-label="Предпросмотр сгенерированного MIDI" hidden>
+            <div class="generator-preview-head"><span>Ноты из созданного MIDI</span><span id="generatorPreviewMeta"></span></div>
+            <div class="generator-roll" id="generatorRoll"></div>
+            <div class="preview-actions generator-preview-actions">
+              <button id="generatorPlayButton" type="button" class="secondary-button">Play preview</button>
+              <button id="generatorStopButton" type="button" class="secondary-button" disabled>Stop</button>
+              <button id="generatorVariationButton" type="button" class="secondary-button">Новый вариант</button>
+            </div>
+          </section>
           <p class="hint" data-i18n="generator.hint">Генератор создаёт воспроизводимый MIDI по музыкальным правилам. Seed позволяет получить тот же результат, а ввод MIDI-нот задаёт мотив для мелодии. Для физической MIDI-клавиатуры нажмите кнопку записи и сыграйте ноты.</p>
         </div>
       </section>
@@ -2479,6 +2519,17 @@ INDEX_HTML = """<!doctype html>
     const generatorStatus = document.getElementById("generatorStatus");
     const generatorStats = document.getElementById("generatorStats");
     const captureMidiButton = document.getElementById("captureMidiButton");
+    const generatorPresetButtons = document.querySelectorAll(".generator-preset");
+    const generatorPreview = document.getElementById("generatorPreview");
+    const generatorRoll = document.getElementById("generatorRoll");
+    const generatorPreviewMeta = document.getElementById("generatorPreviewMeta");
+    const generatorResultState = document.getElementById("generatorResultState");
+    const generatorPlayButton = document.getElementById("generatorPlayButton");
+    const generatorStopButton = document.getElementById("generatorStopButton");
+    const generatorVariationButton = document.getElementById("generatorVariationButton");
+    let generatedPreviewNotes = [];
+    let previewAudioContext = null;
+    let previewNodes = [];
     const tabButtons = document.querySelectorAll(".tab-button");
     const panels = document.querySelectorAll(".panel");
     const languageButtons = document.querySelectorAll(".language-button[data-lang]");
@@ -3384,6 +3435,110 @@ INDEX_HTML = """<!doctype html>
       generatorStats.innerHTML = items.map(([label, value]) => `<div class="stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
     }
 
+    function readMidiVlq(bytes, cursor) {
+      let value = 0;
+      while (cursor.index < bytes.length) {
+        const byte = bytes[cursor.index++];
+        value = (value << 7) | (byte & 0x7f);
+        if (!(byte & 0x80)) return value;
+      }
+      return value;
+    }
+
+    function parseGeneratedMidi(base64Data) {
+      const bytes = Uint8Array.from(atob(base64Data), (char) => char.charCodeAt(0));
+      const textAt = (offset) => String.fromCharCode(...bytes.slice(offset, offset + 4));
+      const u32 = (offset) => (bytes[offset] * 0x1000000) + (bytes[offset + 1] << 16) + (bytes[offset + 2] << 8) + bytes[offset + 3];
+      if (textAt(0) !== "MThd") throw new Error("Не удалось прочитать MIDI для предпросмотра.");
+      const division = (bytes[12] << 8) | bytes[13];
+      const trackCount = (bytes[10] << 8) | bytes[11];
+      const notes = [];
+      let offset = 8 + u32(4);
+
+      for (let track = 0; track < trackCount && offset < bytes.length; track += 1) {
+        if (textAt(offset) !== "MTrk") break;
+        const trackEnd = offset + 8 + u32(offset + 4);
+        const cursor = { index: offset + 8 };
+        const active = new Map();
+        let tick = 0;
+        let runningStatus = 0;
+        while (cursor.index < trackEnd) {
+          tick += readMidiVlq(bytes, cursor);
+          let status = bytes[cursor.index];
+          if (status >= 0x80) { cursor.index += 1; runningStatus = status; }
+          else status = runningStatus;
+          if (status === 0xff) { cursor.index += 1; cursor.index += readMidiVlq(bytes, cursor); cursor.index += readMidiVlq(bytes, cursor); continue; }
+          if (status === 0xf0 || status === 0xf7) { cursor.index += readMidiVlq(bytes, cursor); continue; }
+          const command = status & 0xf0;
+          const channel = status & 0x0f;
+          const note = bytes[cursor.index++];
+          const velocity = command === 0xc0 || command === 0xd0 ? 0 : bytes[cursor.index++];
+          if ((command === 0x90 && velocity > 0)) {
+            const key = `${channel}:${note}`;
+            active.set(key, { tick, note, velocity, channel });
+          } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
+            const key = `${channel}:${note}`;
+            const start = active.get(key);
+            if (start) { notes.push({ ...start, end: Math.max(tick, start.tick + 1) }); active.delete(key); }
+          }
+        }
+        offset = trackEnd;
+      }
+      return { notes, division: Math.max(division, 1) };
+    }
+
+    function renderGeneratedMidiPreview(base64Data, stats) {
+      const parsed = parseGeneratedMidi(base64Data);
+      const notes = parsed.notes.slice(0, 360);
+      const lastTick = Math.max(...notes.map((note) => note.end), 1);
+      const pitches = notes.filter((note) => note.channel !== 9).map((note) => note.note);
+      const low = Math.min(...pitches, 36);
+      const high = Math.max(...pitches, 84);
+      const pitchRange = Math.max(high - low + 1, 1);
+      generatorRoll.innerHTML = notes.map((note) => {
+        const left = (note.tick / lastTick) * 100;
+        const width = Math.max(((note.end - note.tick) / lastTick) * 100, 0.45);
+        const top = note.channel === 9 ? 88 : (1 - ((note.note - low) / pitchRange)) * 78 + 4;
+        const kind = note.channel === 9 ? " drum" : note.note < 54 ? " bass" : "";
+        return `<i class="generator-note${kind}" style="left:${left.toFixed(3)}%;top:${top.toFixed(3)}%;width:${width.toFixed(3)}%;height:${note.channel === 9 ? 7 : 4.8}%"></i>`;
+      }).join("");
+      generatedPreviewNotes = notes.map((note) => ({ ...note, seconds: note.tick / parsed.division * (60 / stats.bpm), duration: (note.end - note.tick) / parsed.division * (60 / stats.bpm) }));
+      generatorPreviewMeta.textContent = `${notes.length} нот · ${stats.bpm} BPM`;
+      generatorPreview.hidden = false;
+      generatorResultState.textContent = currentLanguage === "en" ? "ready" : "готово";
+    }
+
+    function stopGeneratedPreview() {
+      previewNodes.forEach(({ oscillator, gain }) => { try { oscillator.stop(); gain.disconnect(); oscillator.disconnect(); } catch (_) {} });
+      previewNodes = [];
+      generatorPlayButton.disabled = false;
+      generatorStopButton.disabled = true;
+    }
+
+    function playGeneratedPreview() {
+      if (!generatedPreviewNotes.length) return;
+      stopGeneratedPreview();
+      previewAudioContext = previewAudioContext || new (window.AudioContext || window.webkitAudioContext)();
+      const startAt = previewAudioContext.currentTime + 0.06;
+      const previewLength = 8;
+      generatedPreviewNotes.filter((note) => note.seconds < previewLength).slice(0, 120).forEach((note) => {
+        const oscillator = previewAudioContext.createOscillator();
+        const gain = previewAudioContext.createGain();
+        const frequency = 440 * Math.pow(2, (note.note - 69) / 12);
+        oscillator.type = note.channel === 9 ? "square" : note.note < 54 ? "sawtooth" : "triangle";
+        oscillator.frequency.value = note.channel === 9 ? 120 : frequency;
+        gain.gain.setValueAtTime(note.channel === 9 ? 0.025 : 0.045, startAt + note.seconds);
+        gain.gain.exponentialRampToValueAtTime(0.001, startAt + Math.min(note.seconds + Math.max(note.duration, 0.08), previewLength));
+        oscillator.connect(gain).connect(previewAudioContext.destination);
+        oscillator.start(startAt + note.seconds);
+        oscillator.stop(startAt + Math.min(note.seconds + Math.max(note.duration, 0.08), previewLength));
+        previewNodes.push({ oscillator, gain });
+      });
+      generatorPlayButton.disabled = true;
+      generatorStopButton.disabled = false;
+      window.setTimeout(stopGeneratedPreview, (previewLength + 0.4) * 1000);
+    }
+
     async function submitGenerator() {
       if (!canSpendCredits(1, generatorStatus, currentLanguage === "en" ? "MIDI Generator" : "MIDI Generator")) return;
       const parts = [generatorBass.checked && "bass", generatorMelody.checked && "melody", generatorDrums.checked && "drums"].filter(Boolean);
@@ -3401,7 +3556,7 @@ INDEX_HTML = """<!doctype html>
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || "Generator failed.");
         downloadBase64Midi(payload.filename, payload.midi_base64);
-        renderGeneratorStats(payload.stats); setCredits(payload.credits_remaining ?? creditBalance - 1);
+        renderGeneratorStats(payload.stats); renderGeneratedMidiPreview(payload.midi_base64, payload.stats); setCredits(payload.credits_remaining ?? creditBalance - 1);
         generatorSeed.value = payload.stats.seed; generatorStatus.textContent = currentLanguage === "en" ? `Done. Downloaded ${payload.filename}.` : `Готово. Скачан файл ${payload.filename}.`;
       } catch (error) { generatorStatus.textContent = error.message || "Generator error."; }
       finally { generatorSubmitButton.disabled = false; }
@@ -3431,6 +3586,26 @@ INDEX_HTML = """<!doctype html>
       button.addEventListener("click", () => {
         setFamily(button.dataset.family);
       });
+    });
+
+    generatorPresetButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        generatorPresetButtons.forEach((preset) => preset.classList.toggle("active", preset === button));
+        generatorStyle.value = button.dataset.style;
+        generatorKey.value = button.dataset.key;
+        generatorScale.value = button.dataset.scale;
+        generatorBpm.value = button.dataset.bpm;
+        generatorSwing.value = button.dataset.swing;
+        generatorDensity.value = button.dataset.density;
+        generatorStatus.textContent = currentLanguage === "en" ? "Preset loaded. Generate a new part." : "Пресет загружен. Можно генерировать новую партию.";
+      });
+    });
+
+    generatorPlayButton.addEventListener("click", playGeneratedPreview);
+    generatorStopButton.addEventListener("click", stopGeneratedPreview);
+    generatorVariationButton.addEventListener("click", () => {
+      generatorSeed.value = String((Number(generatorSeed.value) || Math.floor(Math.random() * 100000)) + 1);
+      submitGenerator();
     });
 
     style.addEventListener("change", () => {
