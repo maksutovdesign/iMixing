@@ -27,6 +27,7 @@ class AudioJob:
     output_dir: Path
     genre: str
     target: str
+    role_overrides: dict[str, str] = field(default_factory=dict)
     status: str = "queued"
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -44,6 +45,7 @@ class AudioJob:
             "progress": progress,
             "genre": self.genre,
             "target": self.target,
+            "role_overrides": self.role_overrides,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "error": self.error,
@@ -56,7 +58,7 @@ _jobs: dict[str, AudioJob] = {}
 _jobs_lock = threading.Lock()
 
 
-def create_audio_job(*, genre: str, target: str) -> AudioJob:
+def create_audio_job(*, genre: str, target: str, role_overrides: dict[str, str] | None = None) -> AudioJob:
     JOB_ROOT.mkdir(parents=True, exist_ok=True)
     job_id = uuid.uuid4().hex
     job_dir = JOB_ROOT / job_id
@@ -65,7 +67,14 @@ def create_audio_job(*, genre: str, target: str) -> AudioJob:
     input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    job = AudioJob(id=job_id, input_dir=input_dir, output_dir=output_dir, genre=genre, target=target)
+    job = AudioJob(
+        id=job_id,
+        input_dir=input_dir,
+        output_dir=output_dir,
+        genre=genre,
+        target=target,
+        role_overrides=role_overrides or {},
+    )
     with _jobs_lock:
         _jobs[job_id] = job
     return job
@@ -83,7 +92,7 @@ def render_audio_job(job_id: str) -> None:
 
     _set_status(job, "running")
     try:
-        project = build_project(job.input_dir, job.target)
+        project = build_project(job.input_dir, job.target, job.role_overrides)
         result = render_master(project, job.output_dir, "master.wav", genre=job.genre)
         analysis_json = json.dumps(project.to_dict(), indent=2, ensure_ascii=False)
         mix_plan = render_markdown(project)

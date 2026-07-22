@@ -18,8 +18,8 @@ The service does not try to replace the producer, songwriter, or mix engineer. I
 
 Core product directions:
 
-- `Mix & Master`: upload separated WAV stems, detect track roles, analyze levels and clipping, render a processed stereo mix, apply a basic master bus, and export `master.wav`.
-- `MIDI Doctor`: upload `.mid` or `.midi`, choose a musical profile, repair timing, voicing density, note ranges, velocity, weak notes, and DAW compatibility.
+- `Mix & Master`: upload separated WAV stems, review or override the detected role of every track in Mix Console, analyze levels and clipping, render a processed stereo mix, apply a basic master bus, and export `master.wav`.
+- `MIDI Doctor`: upload `.mid` or `.midi`, choose a musical profile, repair timing, voicing density, note ranges, velocity, weak notes, and DAW compatibility. Drum Doctor is a dedicated mode that cleans drum timing and duplicate hits while retaining the original MIDI pad mapping.
 - `MIDI Generator`: create rule-based basslines, melodies, and drum-machine MIDI up to 10 minutes long, with style, key, scale, BPM, swing, humanize, density, motif, reproducible seed, loop/song form, browser preview, presets, and physical MIDI-keyboard capture controls.
 
 Primary audience:

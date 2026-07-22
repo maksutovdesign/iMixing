@@ -106,12 +106,17 @@ MASTERING_CHAIN = [
 ]
 
 
-def build_project(input_dir: Path, mastering_target: str) -> MixProject:
+def build_project(
+    input_dir: Path,
+    mastering_target: str,
+    role_overrides: dict[str, str] | None = None,
+) -> MixProject:
     audio_paths = sorted(path for path in input_dir.iterdir() if path.suffix.lower() == ".wav")
     if not audio_paths:
         raise FileNotFoundError(f"No WAV stems found in {input_dir}")
 
-    stems = [_build_stem_plan(path) for path in audio_paths]
+    overrides = role_overrides or {}
+    stems = [_build_stem_plan(path, overrides.get(path.name)) for path in audio_paths]
     notes = _build_project_notes(stems)
 
     return MixProject(
@@ -123,9 +128,9 @@ def build_project(input_dir: Path, mastering_target: str) -> MixProject:
     )
 
 
-def _build_stem_plan(path: Path) -> StemPlan:
+def _build_stem_plan(path: Path, role_override: str | None = None) -> StemPlan:
     metrics = analyze_wav(path)
-    role = classify_stem(path, metrics)
+    role = role_override if role_override in ROLE_CHAINS else classify_stem(path, metrics)
     warnings = _warnings_for(metrics)
 
     return StemPlan(

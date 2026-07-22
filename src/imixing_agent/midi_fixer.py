@@ -269,6 +269,12 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         description="Lead-oriented cleanup with mostly monophonic phrasing and stronger top-line continuity.",
         voicing_mode="melodic",
     ),
+    "drums": InstrumentProfile(
+        slug="drums",
+        label="Drums",
+        description="Drum-focused timing and velocity cleanup that preserves pad mapping and avoids harmonic pitch changes.",
+        voicing_mode="drums",
+    ),
 }
 INSTRUMENT_FAMILY_NAMES = tuple(INSTRUMENT_PROFILES)
 
@@ -1620,18 +1626,22 @@ def fix_midi_bytes(
 
     tonal_center = detect_tonal_center(parsed.notes)
     grid = choose_grid(parsed.notes, profile)
-    cleaned = clean_notes(
-        parsed.notes,
-        grid=grid,
-        tonal_center=tonal_center,
-        profile=profile,
-        editing_strength=active_options.editing_strength,
-    )
-    if active_options.editing_strength == "gentle":
+    if instrument_profile.voicing_mode == "drums":
+        cleaned = clean_drum_notes(parsed.notes, grid=grid, editing_strength=active_options.editing_strength)
+        edited = cleaned
+    else:
+        cleaned = clean_notes(
+            parsed.notes,
+            grid=grid,
+            tonal_center=tonal_center,
+            profile=profile,
+            editing_strength=active_options.editing_strength,
+        )
+    if instrument_profile.voicing_mode != "drums" and active_options.editing_strength == "gentle":
         edited = cleaned
     elif instrument_profile.voicing_mode == "melodic":
         edited = extract_melody_texture(cleaned, division=parsed.division, grid=grid, profile=profile)
-    else:
+    elif instrument_profile.voicing_mode != "drums":
         edited = reharmonize_texture(
             cleaned,
             division=parsed.division,
@@ -1669,6 +1679,27 @@ def fix_midi_bytes(
         edited_title=edited_title,
         stats=stats,
     )
+
+
+def clean_drum_notes(notes: list[Note], *, grid: int, editing_strength: str) -> list[Note]:
+    """Quantize drum hits without altering their MIDI pad/pitch mapping."""
+    selected = [note for note in notes if note.channel == 9] or list(notes)
+    by_hit: dict[tuple[int, int, int], Note] = {}
+    duration = max(6, min(grid, 72))
+    for note in selected:
+        start = max(0, _blend_quantize(note.start, grid, editing_strength))
+        end = max(start + 1, _blend_quantize(note.end, grid, editing_strength))
+        if editing_strength != "gentle":
+            end = min(end, start + duration)
+        velocity = clamp(note.velocity, 1, 127)
+        if editing_strength == "strong":
+            velocity = clamp(round(velocity / 8) * 8, 16, 120)
+        candidate = Note(start, end, note.pitch, velocity, 9)
+        key = (candidate.start, candidate.pitch, candidate.channel)
+        existing = by_hit.get(key)
+        if existing is None or candidate.velocity > existing.velocity:
+            by_hit[key] = candidate
+    return sorted(by_hit.values(), key=lambda note: (note.start, note.pitch, note.end))
 
 
 def fix_midi_file(

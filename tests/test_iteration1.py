@@ -150,6 +150,23 @@ class MidiHardeningTests(unittest.TestCase):
         self.assertEqual(melody.stats.instrument_family, "melody")
         self.assertLess(melody.stats.edited_note_count, harmony.stats.edited_note_count)
 
+    def test_drum_doctor_preserves_pad_mapping_and_removes_duplicate_hits(self) -> None:
+        source = build_midi_from_notes(
+            [Note(5, 80, 36, 97, 9), Note(6, 79, 36, 82, 9), Note(100, 150, 38, 91, 9)],
+            title="drums",
+        )
+        result = fix_midi_bytes(
+            source,
+            source_name="drums.mid",
+            options=MidiFixOptions(instrument_family="drums", editing_strength="strong"),
+        )
+        edited = parse_midi_bytes(result.midi_bytes).notes
+
+        self.assertEqual(result.stats.instrument_family, "drums")
+        self.assertEqual({note.pitch for note in edited}, {36, 38})
+        self.assertTrue(all(note.channel == 9 for note in edited))
+        self.assertEqual(sum(1 for note in edited if note.pitch == 36), 1)
+
     def test_midi_fix_detects_harmonic_minor_and_preserves_leading_tone(self) -> None:
         source = build_midi_from_notes(
             [
@@ -233,6 +250,14 @@ class AudioHardeningTests(unittest.TestCase):
         self.assertIsNotNone(metrics.spectral_centroid_hz)
         self.assertGreater(metrics.low_band_ratio or 0.0, 0.9)
         self.assertEqual(classify_stem(path, metrics), "bass")
+
+    def test_mix_project_honors_manual_stem_role_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            write_sine_wav(root / "take_01.wav", freq=120.0)
+            project = build_project(root, "streaming:-14LUFS:-1dBTP", {"take_01.wav": "lead_vocal"})
+
+        self.assertEqual(project.stems[0].role, "lead_vocal")
 
     def test_mix_quality_detects_kick_bass_masking_risk(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

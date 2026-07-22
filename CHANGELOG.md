@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased - Generator 2.1
+## Unreleased - Product Workflow 2.3
+
+- Added Drum Doctor: a working MIDI cleanup mode for drum patterns that preserves pad pitches, tightens timing, normalizes velocity, and removes duplicate hits.
+- Added Mix Console role controls before audio rendering, so automatic role detection can be overridden per uploaded stem.
+- Made the shared product header context-aware across MIDI Doctor, Mix & Master, MIDI Generator, and Pricing.
+- Fixed the four-tab navigation layout and added coverage for manual mix-role mapping and drum MIDI cleanup.
+
+## v0.2.1 - Generator Workflow
 
 - Added `loop` and `song` arrangement modes; song mode shapes intro, verse, chorus, bridge, and outro energy.
 - Added generator presets, reproducible variant history, and one-click restore of saved settings and seed.

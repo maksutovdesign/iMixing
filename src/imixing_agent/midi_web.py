@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import wave
 from dataclasses import asdict
@@ -18,6 +19,7 @@ from .midi_fixer import (
     list_instrument_family_names,
     list_style_names,
 )
+from .mix_strategy import ROLE_CHAINS
 from .persistence import AppDatabase
 from .queueing import build_queue
 from .rendering import list_audio_genres
@@ -614,7 +616,7 @@ INDEX_HTML = """<!doctype html>
 
     .topup-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
       margin-top: 14px;
     }
@@ -1950,6 +1952,8 @@ INDEX_HTML = """<!doctype html>
     .generator-history { display: grid; gap: 12px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
     .generator-history-list { display: grid; gap: 7px; }.generator-history-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #0b0b0b; }
     .generator-history-item strong { display: block; font-size: 12px; }.generator-history-item span { color: var(--muted); font-size: 11px; }.history-restore, .history-clear { min-height: auto; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: transparent; color: var(--accent); box-shadow: none; font-size: 11px; }.history-clear { color: var(--muted); }
+    .mix-console { display: grid; gap: 12px; margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #0b0b0b; }.mix-console-head { display: flex; justify-content: space-between; gap: 12px; color: var(--accent); font-family: "IBM Plex Mono", "Noto Sans Mono", ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }.mix-console-head span:last-child { color: var(--muted); font-size: 10px; font-weight: 500; text-align: right; }.audio-role-controls { display: grid; gap: 8px; }.audio-role-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 10px; align-items: center; padding-top: 8px; border-top: 1px solid var(--line); }.audio-role-row span { overflow: hidden; color: var(--ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }.audio-role-row select { min-width: 0; padding: 9px 10px; border-radius: 8px; font-size: 12px; }
+    @media (max-width: 780px) { .audio-role-row { grid-template-columns: 1fr; }.mix-console-head { align-items: flex-start; flex-direction: column; }.mix-console-head span:last-child { text-align: left; } }
     @media (max-width: 780px) { .generator-preview-actions { grid-template-columns: 1fr; }.generator-result-head h2 { font-size: 22px; } }
   </style>
 </head>
@@ -1958,9 +1962,9 @@ INDEX_HTML = """<!doctype html>
     <section class="hero">
       <div class="hero-top">
         <div>
-          <div class="eyebrow" data-i18n="hero.eyebrow">iMixing · редактор MIDI</div>
-          <h1 data-i18n="hero.title">Правим MIDI так, чтобы он звучал собранно.</h1>
-          <p class="subtitle" data-i18n="hero.subtitle">
+          <div class="eyebrow" id="heroEyebrow" data-i18n="hero.eyebrow">iMixing · редактор MIDI</div>
+          <h1 id="heroTitle" data-i18n="hero.title">Правим MIDI так, чтобы он звучал собранно.</h1>
+          <p class="subtitle" id="heroSubtitle" data-i18n="hero.subtitle">
             Загрузите MIDI для музыкального исправления или WAV-дорожки для быстрого сведения и мастеринга. Сервис обработает материал и отдаст готовый файл обратно.
           </p>
         </div>
@@ -2026,7 +2030,7 @@ INDEX_HTML = """<!doctype html>
               <button class="family-chip active" type="button" data-family="harmony" data-i18n="family.harmony">Гармония</button>
               <button class="family-chip" type="button" data-family="keys" data-i18n="family.keys">Клавиши</button>
               <button class="family-chip" type="button" data-family="melody" data-i18n="family.melody">Мелодия</button>
-              <button class="family-chip" type="button" disabled aria-disabled="true" data-i18n="family.drumsSoon">Барабаны · скоро</button>
+              <button class="family-chip" type="button" data-family="drums" data-i18n="family.drums">Барабаны</button>
             </div>
             <div class="family-copy" id="familyCopy">
               Гармония подходит для аккордов, пэдов, многоголосных партий и общих гармонических MIDI-фрагментов.
@@ -2250,6 +2254,10 @@ INDEX_HTML = """<!doctype html>
             </div>
           </label>
           <div class="file-list" id="audioFileList"></div>
+          <section class="mix-console" id="mixConsole" hidden aria-label="Mix Console">
+            <div class="mix-console-head"><span>Mix Console</span><span id="mixConsoleNote">Роли можно изменить до рендера</span></div>
+            <div id="audioRoleControls" class="audio-role-controls"></div>
+          </section>
         </div>
 
         <div class="card">
@@ -2502,6 +2510,9 @@ INDEX_HTML = """<!doctype html>
     const fileTitle = document.getElementById("fileTitle");
     const fileCopy = document.getElementById("fileCopy");
     const creditBalanceEl = document.getElementById("creditBalance");
+    const heroEyebrow = document.getElementById("heroEyebrow");
+    const heroTitle = document.getElementById("heroTitle");
+    const heroSubtitle = document.getElementById("heroSubtitle");
     const creditPackButtons = document.querySelectorAll(".credit-pack[data-credits]");
     const resetCreditsButtons = document.querySelectorAll(".reset-credits");
     const familyButtons = document.querySelectorAll(".family-chip[data-family]");
@@ -2554,6 +2565,8 @@ INDEX_HTML = """<!doctype html>
     const audioFileTitle = document.getElementById("audioFileTitle");
     const audioFileCopy = document.getElementById("audioFileCopy");
     const audioFileList = document.getElementById("audioFileList");
+    const mixConsole = document.getElementById("mixConsole");
+    const audioRoleControls = document.getElementById("audioRoleControls");
     const audioGenre = document.getElementById("audioGenre");
     const masterTarget = document.getElementById("masterTarget");
     const masterPreview = document.getElementById("masterPreview");
@@ -2609,10 +2622,11 @@ INDEX_HTML = """<!doctype html>
         "family.harmony": "Гармония",
         "family.keys": "Клавиши",
         "family.melody": "Мелодия",
-        "family.drumsSoon": "Барабаны · скоро",
+        "family.drums": "Барабаны",
         "family.harmonyHint": "Гармония подходит для аккордов, пэдов, многоголосных партий и общих гармонических MIDI-фрагментов.",
         "family.keysHint": "Клавиши лучше использовать для фортепианных и клавишных партий, где важна раскладка рук.",
         "family.melodyHint": "Мелодия лучше подходит для лидов, верхних линий и линейных одноголосных фраз.",
+        "family.drumsHint": "Drum Doctor выравнивает грув и velocity, убирает дубли и сохраняет MIDI-пэды без гармонической правки.",
         "audio.pill": "Загрузить дорожки · получить мастер WAV",
         "audio.dropTitle": "Перетащите WAV-дорожки сюда",
         "audio.dropCopy": "Загрузите дорожки: барабаны, бас, вокал, гитара, синтезатор или эффекты. Чем понятнее имена файлов, тем лучше агент распознает роли.",
@@ -2834,10 +2848,11 @@ INDEX_HTML = """<!doctype html>
         "family.harmony": "Harmony",
         "family.keys": "Keys",
         "family.melody": "Melody",
-        "family.drumsSoon": "Drums · soon",
+        "family.drums": "Drums",
         "family.harmonyHint": "Harmony is best for chords, pads, chord stacks, and general harmonic MIDI fragments.",
         "family.keysHint": "Keys is better for piano and keyboard voicings where hand layout matters.",
         "family.melodyHint": "Melody is best for leads, toplines, and linear single-note phrases.",
+        "family.drumsHint": "Drum Doctor tightens groove and velocity, removes duplicate hits, and preserves MIDI pad mapping without harmonic edits.",
         "audio.pill": "Upload stems, get master.wav",
         "audio.dropTitle": "Drop WAV stems here",
         "audio.dropCopy": "Upload stems: drums, bass, vocal, guitar, synth, or fx. Clear filenames help the agent detect roles.",
@@ -3020,14 +3035,17 @@ INDEX_HTML = """<!doctype html>
       harmony: "family.harmonyHint",
       keys: "family.keysHint",
       melody: "family.melodyHint",
+      drums: "family.drumsHint",
     };
     const familyStyleDefaults = {
       harmony: "balanced",
       keys: "piano",
       melody: "pop",
+      drums: "balanced",
     };
     let currentFile = null;
     let currentAudioFiles = [];
+    let audioRoleOverrides = {};
     let currentMaster = null;
     let currentFamily = "harmony";
     let styleTouched = false;
@@ -3057,6 +3075,7 @@ INDEX_HTML = """<!doctype html>
         button.classList.toggle("active", button.dataset.lang === currentLanguage);
       });
       setFamily(currentFamily);
+      setActiveTab(document.querySelector(".tab-button.active")?.dataset.tab || "midiPanel");
       if (!currentFile) {
         fileTitle.textContent = t("midi.dropTitle");
         fileCopy.textContent = t("midi.dropCopy");
@@ -3140,15 +3159,37 @@ INDEX_HTML = """<!doctype html>
         return true;
       }
       statusElement.textContent = t("credits.insufficient", { feature: featureName, cost });
-      tabButtons.forEach((item) => item.classList.toggle("active", item.dataset.tab === "pricingPanel"));
-      panels.forEach((panel) => panel.classList.toggle("active", panel.id === "pricingPanel"));
+      setActiveTab("pricingPanel");
       return false;
+    }
+
+    function setActiveTab(tabId) {
+      tabButtons.forEach((item) => item.classList.toggle("active", item.dataset.tab === tabId));
+      panels.forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+      const copy = {
+        midiPanel: {
+          ru: ["iMixing · редактор MIDI", "Правим MIDI так, чтобы он звучал собранно.", "Загрузите MIDI, выберите музыкальный режим и получите чистый, совместимый с DAW файл."],
+          en: ["iMixing · MIDI Doctor", "Make MIDI feel arranged, not random.", "Upload MIDI, choose a musical mode, and export a clean DAW-ready file."],
+        },
+        audioPanel: {
+          ru: ["iMixing · Mix & Master", "Соберите дорожки в ясный, готовый к релизу мастер.", "Загрузите WAV-stems, проверьте роли, характер микса и loudness-цель перед запуском рендера."],
+          en: ["iMixing · Mix & Master", "Turn separate stems into a clear release-ready master.", "Upload WAV stems, review roles, select a mix character and loudness target before rendering."],
+        },
+        generatorPanel: {
+          ru: ["iMixing · MIDI Generator", "От идеи до MIDI-аранжировки за один рабочий проход.", "Выберите стиль, форму и характер партии. Сервис создаст бас, мелодию и drums для вашей DAW."],
+          en: ["iMixing · MIDI Generator", "Move from an idea to a MIDI arrangement in one pass.", "Choose style, form and character. The service creates bass, melody and drums for your DAW."],
+        },
+        pricingPanel: {
+          ru: ["iMixing · планы", "Инструменты для черновика, релиза и студийной работы.", "Начните с демо, а затем выберите объём MIDI-экспортов и аудио-рендеров под свой процесс."],
+          en: ["iMixing · plans", "Tools for sketches, releases and studio work.", "Start with the demo, then choose MIDI exports and audio renders for your workflow."],
+        },
+      }[tabId]?.[currentLanguage] || [];
+      if (copy.length) [heroEyebrow.textContent, heroTitle.textContent, heroSubtitle.textContent] = copy;
     }
 
     tabButtons.forEach((button) => {
       button.addEventListener("click", () => {
-        tabButtons.forEach((item) => item.classList.toggle("active", item === button));
-        panels.forEach((panel) => panel.classList.toggle("active", panel.id === button.dataset.tab));
+        setActiveTab(button.dataset.tab);
       });
     });
 
@@ -3242,6 +3283,8 @@ INDEX_HTML = """<!doctype html>
         audioFileCopy.textContent = t("audio.dropCopy");
         audioStatusEl.textContent = t("audio.statusEmpty");
         audioFileList.innerHTML = "";
+        audioRoleOverrides = {};
+        mixConsole.hidden = true;
         audioStatsEl.innerHTML = "";
         clearMasterPreview();
         return;
@@ -3258,6 +3301,30 @@ INDEX_HTML = """<!doctype html>
       audioFileList.innerHTML = currentAudioFiles.map((file) => (
         `<div class="file-item"><span>${escapeHtml(file.name)}</span><strong>${Math.max(1, Math.round(file.size / 1024))} KB</strong></div>`
       )).join("");
+      audioRoleOverrides = Object.fromEntries(currentAudioFiles.map((file) => [file.name, inferAudioRole(file.name)]));
+      renderAudioRoleControls();
+    }
+
+    function inferAudioRole(filename) {
+      const value = filename.toLowerCase();
+      if (value.includes("kick")) return "kick";
+      if (value.includes("snare")) return "snare";
+      if (value.includes("drum")) return "drums";
+      if (value.includes("bass") || value.includes("808")) return "bass";
+      if (value.includes("lead") || value.includes("vocal") || value.includes("vox")) return "lead_vocal";
+      if (value.includes("back") || value.includes("bv")) return "backing_vocals";
+      if (value.includes("guitar")) return "guitar";
+      if (value.includes("piano") || value.includes("key")) return "keys";
+      if (value.includes("synth")) return "synth";
+      if (value.includes("fx") || value.includes("effect")) return "fx";
+      return "other";
+    }
+
+    function renderAudioRoleControls() {
+      const options = ["kick", "snare", "drums", "bass", "lead_vocal", "backing_vocals", "guitar", "keys", "synth", "fx", "other"];
+      const labels = { kick: "Kick", snare: "Snare", drums: "Drums", bass: "Bass", lead_vocal: "Lead vocal", backing_vocals: "Backing vocals", guitar: "Guitar", keys: "Keys", synth: "Synth", fx: "FX", other: "Other" };
+      mixConsole.hidden = !currentAudioFiles.length;
+      audioRoleControls.innerHTML = currentAudioFiles.map((file, index) => `<label class="audio-role-row"><span>${escapeHtml(file.name)}</span><select data-audio-role-index="${index}">${options.map((role) => `<option value="${role}"${audioRoleOverrides[file.name] === role ? " selected" : ""}>${labels[role]}</option>`).join("")}</select></label>`).join("");
     }
 
     function renderAudioStats(payload) {
@@ -3412,6 +3479,7 @@ INDEX_HTML = """<!doctype html>
       currentAudioFiles.forEach((file) => formData.append("files", file));
       formData.append("genre", audioGenre.value);
       formData.append("target", masterTarget.value);
+      formData.append("role_overrides", JSON.stringify(audioRoleOverrides));
 
       try {
         const response = await fetch("/api/audio/jobs", { method: "POST", body: formData });
@@ -3729,6 +3797,13 @@ INDEX_HTML = """<!doctype html>
         audioInput.files = event.dataTransfer.files;
         setAudioFiles(event.dataTransfer.files);
       }
+    });
+
+    audioRoleControls.addEventListener("change", (event) => {
+      const select = event.target.closest("[data-audio-role-index]");
+      if (!select) return;
+      const file = currentAudioFiles[Number(select.dataset.audioRoleIndex)];
+      if (file) audioRoleOverrides[file.name] = select.value;
     });
 
     audioSubmitButton.addEventListener("click", submitAudio);
@@ -4656,12 +4731,28 @@ def _audio_job_response(job_id: str, status: str, *, detail: str | None = None) 
     return payload
 
 
+def _parse_role_overrides(value: str) -> dict[str, str]:
+    try:
+        payload = json.loads(value or "{}")
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=400, detail="Role overrides must be valid JSON.") from error
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Role overrides must be a filename-to-role object.")
+    overrides: dict[str, str] = {}
+    for filename, role in payload.items():
+        if not isinstance(filename, str) or not isinstance(role, str) or role not in ROLE_CHAINS:
+            raise HTTPException(status_code=400, detail="Role override contains an unsupported stem role.")
+        overrides[Path(filename).name] = role
+    return overrides
+
+
 async def _enqueue_audio_mix_job(
     *,
     background_tasks: BackgroundTasks,
     files: list[UploadFile],
     genre: str,
     target: str,
+    role_overrides: dict[str, str] | None = None,
 ) -> dict[str, str | int]:
     if not files:
         raise HTTPException(status_code=400, detail="Upload at least one WAV stem.")
@@ -4670,9 +4761,11 @@ async def _enqueue_audio_mix_job(
     if genre not in list_audio_genres():
         raise HTTPException(status_code=400, detail="Unsupported audio genre.")
 
+    requested_overrides = role_overrides or {}
     job = create_audio_job(genre=genre, target=target)
     total_size = 0
     used_names: set[str] = set()
+    resolved_overrides: dict[str, str] = {}
 
     try:
         for index, upload in enumerate(files, start=1):
@@ -4682,6 +4775,8 @@ async def _enqueue_audio_mix_job(
 
             safe_name = _unique_upload_name(filename, used_names)
             used_names.add(safe_name)
+            if filename in requested_overrides:
+                resolved_overrides[safe_name] = requested_overrides[filename]
             destination = job.input_dir / safe_name
             written = await _write_upload_stream(upload, destination)
             if written <= 0:
@@ -4698,6 +4793,8 @@ async def _enqueue_audio_mix_job(
     except Exception:
         cleanup_audio_job(job.id)
         raise
+
+    job.role_overrides = resolved_overrides
 
     database.save_audio_job(
         job_id=job.id,
@@ -4883,6 +4980,7 @@ async def mix_audio(
     files: list[UploadFile] = File(...),
     genre: str = Form("balanced"),
     target: str = Form("streaming:-14LUFS:-1dBTP"),
+    role_overrides: str = Form("{}"),
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
 ) -> dict[str, str | int]:
     if _credit_balance(response, credit_session) < AUDIO_CREDIT_COST:
@@ -4892,6 +4990,7 @@ async def mix_audio(
         files=files,
         genre=genre,
         target=target,
+        role_overrides=_parse_role_overrides(role_overrides),
     )
     payload["credits_remaining"] = _spend_credits(response, credit_session, AUDIO_CREDIT_COST, "Mix & Master")
     payload["detail"] = "Audio mix now runs as an async job. Poll the returned URL and download files when the job is done."
@@ -4905,6 +5004,7 @@ async def create_audio_mix_job(
     files: list[UploadFile] = File(...),
     genre: str = Form("balanced"),
     target: str = Form("streaming:-14LUFS:-1dBTP"),
+    role_overrides: str = Form("{}"),
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
 ) -> dict[str, str | int]:
     if _credit_balance(response, credit_session) < AUDIO_CREDIT_COST:
@@ -4914,6 +5014,7 @@ async def create_audio_mix_job(
         files=files,
         genre=genre,
         target=target,
+        role_overrides=_parse_role_overrides(role_overrides),
     )
     payload["credits_remaining"] = _spend_credits(response, credit_session, AUDIO_CREDIT_COST, "Mix & Master")
     return payload
