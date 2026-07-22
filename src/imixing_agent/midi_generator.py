@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import random
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Iterable
 
 from .midi_fixer import Note, PITCH_CLASS_NAMES, render_midi_bytes
@@ -14,6 +14,7 @@ MIN_BPM = 40
 MAX_BPM = 240
 GENERATOR_PARTS = ("bass", "melody", "drums")
 GENERATOR_STYLES = ("pop", "rap", "trap", "house", "techno", "edm", "rock", "cinematic", "jazz")
+ARRANGEMENTS = ("loop", "song")
 SCALES = {
     "major": (0, 2, 4, 5, 7, 9, 11),
     "minor": (0, 2, 3, 5, 7, 8, 10),
@@ -47,6 +48,7 @@ class MidiGenerationOptions:
     parts: tuple[str, ...] = GENERATOR_PARTS
     seed: int | None = None
     motif: str = ""
+    arrangement: str = "loop"
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,10 @@ def list_generator_styles() -> tuple[str, ...]:
     return GENERATOR_STYLES
 
 
+def list_arrangements() -> tuple[str, ...]:
+    return ARRANGEMENTS
+
+
 def generate_midi(options: MidiGenerationOptions) -> MidiGenerationResult:
     _validate(options)
     root = _parse_root(options.key)
@@ -78,16 +84,20 @@ def generate_midi(options: MidiGenerationOptions) -> MidiGenerationResult:
     motif = _parse_motif(options.motif)
     notes: list[Note] = []
 
+    section_bars = _arrangement_sections(bar_count, options.arrangement)
     for bar in range(bar_count):
         bar_start = bar * bar_ticks
         degree = progression[bar % len(progression)]
         chord_root = root + scale[degree % len(scale)]
-        if "bass" in options.parts:
-            notes.extend(_bass_bar(bar_start, chord_root, options, rng))
-        if "melody" in options.parts:
-            notes.extend(_melody_bar(bar_start, chord_root, root, scale, motif, bar, options, rng))
-        if "drums" in options.parts:
-            notes.extend(_drum_bar(bar_start, bar, bar_count, options, rng))
+        section_name, section_density = section_bars[bar]
+        section_options = replace(options, density=max(0.1, min(1.0, options.density * section_density)))
+        section_parts = _parts_for_section(options.parts, section_name)
+        if "bass" in section_parts:
+            notes.extend(_bass_bar(bar_start, chord_root, section_options, rng))
+        if "melody" in section_parts:
+            notes.extend(_melody_bar(bar_start, chord_root, root, scale, motif, bar, section_options, rng))
+        if "drums" in section_parts:
+            notes.extend(_drum_bar(bar_start, bar, bar_count, section_options, rng))
 
     notes.sort(key=lambda note: (note.start, note.channel, note.pitch, note.end))
     tempo = round(60_000_000 / options.bpm)
@@ -118,6 +128,8 @@ def generate_midi(options: MidiGenerationOptions) -> MidiGenerationResult:
             "humanize": options.humanize,
             "density": options.density,
             "parts": list(options.parts),
+            "arrangement": options.arrangement,
+            "sections": _section_summary(section_bars),
             "note_counts": counts,
             "seed": options.seed if options.seed is not None else _stable_seed(options),
         },
@@ -224,6 +236,46 @@ def _part_for_channel(channel: int) -> str:
     return "drums" if channel == 9 else "bass" if channel == 1 else "melody"
 
 
+def _arrangement_sections(bar_count: int, arrangement: str) -> list[tuple[str, float]]:
+    if arrangement == "loop" or bar_count < 8:
+        return [("loop", 1.0)] * bar_count
+    intro_end = max(1, round(bar_count * 0.12))
+    verse_end = max(intro_end + 1, round(bar_count * 0.38))
+    chorus_end = max(verse_end + 1, round(bar_count * 0.64))
+    bridge_end = max(chorus_end + 1, round(bar_count * 0.82))
+    sections: list[tuple[str, float]] = []
+    for bar in range(bar_count):
+        if bar < intro_end:
+            sections.append(("intro", 0.48))
+        elif bar < verse_end:
+            sections.append(("verse", 0.78))
+        elif bar < chorus_end:
+            sections.append(("chorus", 1.0))
+        elif bar < bridge_end:
+            sections.append(("bridge", 0.6))
+        else:
+            sections.append(("outro", 0.68))
+    return sections
+
+
+def _parts_for_section(parts: tuple[str, ...], section_name: str) -> tuple[str, ...]:
+    if section_name == "intro":
+        return tuple(part for part in parts if part != "drums") or parts
+    if section_name == "bridge":
+        return tuple(part for part in parts if part != "bass") or parts
+    return parts
+
+
+def _section_summary(sections: list[tuple[str, float]]) -> list[dict[str, int | str]]:
+    summary: list[dict[str, int | str]] = []
+    for name, _ in sections:
+        if summary and summary[-1]["name"] == name:
+            summary[-1]["bars"] = int(summary[-1]["bars"]) + 1
+        else:
+            summary.append({"name": name, "bars": 1})
+    return summary
+
+
 def _stable_seed(options: MidiGenerationOptions) -> int:
     return abs(hash((options.bpm, options.duration_seconds, options.key, options.scale, options.style, options.motif))) % (2**31)
 
@@ -237,6 +289,8 @@ def _validate(options: MidiGenerationOptions) -> None:
         raise ValueError("Scale must be major or minor.")
     if options.style not in GENERATOR_STYLES:
         raise ValueError("Unsupported generator style.")
+    if options.arrangement not in ARRANGEMENTS:
+        raise ValueError("Arrangement must be loop or song.")
     if not 0.0 <= options.swing <= 0.5 or not 0.0 <= options.humanize <= 1.0 or not 0.1 <= options.density <= 1.0:
         raise ValueError("Swing, humanize, or density is outside its supported range.")
     if not options.parts or any(part not in GENERATOR_PARTS for part in options.parts):

@@ -10,7 +10,7 @@ from fastapi import BackgroundTasks, Body, Cookie, FastAPI, File, Form, HTTPExce
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from .audio_jobs import cleanup_audio_job, create_audio_job, get_audio_job, render_audio_job
-from .midi_generator import MidiGenerationOptions, generate_midi, list_generator_styles
+from .midi_generator import MidiGenerationOptions, generate_midi, list_arrangements, list_generator_styles
 from .midi_fixer import (
     EDITING_STRENGTHS,
     MidiFixOptions,
@@ -1947,6 +1947,9 @@ INDEX_HTML = """<!doctype html>
     .generator-note.drum { background: #a92a2a; }.generator-note.bass { background: #ff5a5a; }
     .generator-preview-actions { grid-template-columns: repeat(3, 1fr); }
     .generator-preview-actions .secondary-button { min-height: 42px; padding: 10px; }
+    .generator-history { display: grid; gap: 12px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .generator-history-list { display: grid; gap: 7px; }.generator-history-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #0b0b0b; }
+    .generator-history-item strong { display: block; font-size: 12px; }.generator-history-item span { color: var(--muted); font-size: 11px; }.history-restore, .history-clear { min-height: auto; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: transparent; color: var(--accent); box-shadow: none; font-size: 11px; }.history-clear { color: var(--muted); }
     @media (max-width: 780px) { .generator-preview-actions { grid-template-columns: 1fr; }.generator-result-head h2 { font-size: 22px; } }
   </style>
 </head>
@@ -2194,6 +2197,7 @@ INDEX_HTML = """<!doctype html>
             <label><span data-i18n="generator.scale">Лад</span><select id="generatorScale"><option value="minor" data-i18n="generator.minor">Минор</option><option value="major" data-i18n="generator.major">Мажор</option></select></label>
             <label><span data-i18n="generator.bpm">BPM</span><input id="generatorBpm" type="number" min="40" max="240" value="120"></label>
             <label><span data-i18n="generator.duration">Длительность, секунд</span><input id="generatorDuration" type="number" min="4" max="600" value="60"></label>
+            <label><span data-i18n="generator.arrangement">Структура</span><select id="generatorArrangement"><option value="loop" data-i18n="generator.arrangementLoop">Луп</option><option value="song" data-i18n="generator.arrangementSong">Песня</option></select></label>
             <label><span data-i18n="generator.swing">Swing</span><input id="generatorSwing" type="number" min="0" max="0.5" step="0.01" value="0.08"></label>
             <label><span data-i18n="generator.humanize">Humanize</span><input id="generatorHumanize" type="number" min="0" max="1" step="0.01" value="0.15"></label>
             <label><span data-i18n="generator.density">Плотность</span><input id="generatorDensity" type="number" min="0.1" max="1" step="0.05" value="0.65"></label>
@@ -2224,6 +2228,10 @@ INDEX_HTML = """<!doctype html>
               <button id="generatorStopButton" type="button" class="secondary-button" disabled>Stop</button>
               <button id="generatorVariationButton" type="button" class="secondary-button">Новый вариант</button>
             </div>
+          </section>
+          <section class="generator-history" id="generatorHistory" aria-label="Недавние генерации" hidden>
+            <div class="generator-preview-head"><span>Недавние варианты</span><button type="button" id="clearGeneratorHistory" class="history-clear">Очистить</button></div>
+            <div id="generatorHistoryList" class="generator-history-list"></div>
           </section>
           <p class="hint" data-i18n="generator.hint">Генератор создаёт воспроизводимый MIDI по музыкальным правилам. Seed позволяет получить тот же результат, а ввод MIDI-нот задаёт мотив для мелодии. Для физической MIDI-клавиатуры нажмите кнопку записи и сыграйте ноты.</p>
         </div>
@@ -2507,6 +2515,7 @@ INDEX_HTML = """<!doctype html>
     const generatorScale = document.getElementById("generatorScale");
     const generatorBpm = document.getElementById("generatorBpm");
     const generatorDuration = document.getElementById("generatorDuration");
+    const generatorArrangement = document.getElementById("generatorArrangement");
     const generatorSwing = document.getElementById("generatorSwing");
     const generatorHumanize = document.getElementById("generatorHumanize");
     const generatorDensity = document.getElementById("generatorDensity");
@@ -2527,9 +2536,13 @@ INDEX_HTML = """<!doctype html>
     const generatorPlayButton = document.getElementById("generatorPlayButton");
     const generatorStopButton = document.getElementById("generatorStopButton");
     const generatorVariationButton = document.getElementById("generatorVariationButton");
+    const generatorHistory = document.getElementById("generatorHistory");
+    const generatorHistoryList = document.getElementById("generatorHistoryList");
+    const clearGeneratorHistory = document.getElementById("clearGeneratorHistory");
     let generatedPreviewNotes = [];
     let previewAudioContext = null;
     let previewNodes = [];
+    const generatorHistoryKey = "imixing-generator-history-v1";
     const tabButtons = document.querySelectorAll(".tab-button");
     const panels = document.querySelectorAll(".panel");
     const languageButtons = document.querySelectorAll(".language-button[data-lang]");
@@ -2581,7 +2594,8 @@ INDEX_HTML = """<!doctype html>
         "generator.pill": "Музыкальные правила · MIDI до 10 минут",
         "generator.style": "Стиль", "generator.key": "Тональность", "generator.scale": "Лад",
         "generator.minor": "Минор", "generator.major": "Мажор", "generator.bpm": "BPM",
-        "generator.duration": "Длительность, секунд", "generator.swing": "Swing", "generator.humanize": "Humanize",
+        "generator.duration": "Длительность, секунд", "generator.arrangement": "Структура", "generator.arrangementLoop": "Луп", "generator.arrangementSong": "Песня: intro · verse · chorus",
+        "generator.swing": "Swing", "generator.humanize": "Humanize",
         "generator.density": "Плотность", "generator.seed": "Seed", "generator.motif": "Мотив / ноты MIDI",
         "generator.bass": "Bassline", "generator.melody": "Melody", "generator.drums": "Drum machine",
         "generator.capture": "Записать ноты с MIDI-клавиатуры", "generator.submit": "Сгенерировать и скачать MIDI",
@@ -2805,7 +2819,8 @@ INDEX_HTML = """<!doctype html>
         "generator.pill": "Musical rules · MIDI up to 10 minutes",
         "generator.style": "Style", "generator.key": "Key", "generator.scale": "Scale",
         "generator.minor": "Minor", "generator.major": "Major", "generator.bpm": "BPM",
-        "generator.duration": "Duration, seconds", "generator.swing": "Swing", "generator.humanize": "Humanize",
+        "generator.duration": "Duration, seconds", "generator.arrangement": "Structure", "generator.arrangementLoop": "Loop", "generator.arrangementSong": "Song: intro · verse · chorus",
+        "generator.swing": "Swing", "generator.humanize": "Humanize",
         "generator.density": "Density", "generator.seed": "Seed", "generator.motif": "Motif / MIDI notes",
         "generator.bass": "Bassline", "generator.melody": "Melody", "generator.drums": "Drum machine",
         "generator.capture": "Capture from MIDI keyboard", "generator.submit": "Generate and download MIDI",
@@ -3424,11 +3439,13 @@ INDEX_HTML = """<!doctype html>
 
     function renderGeneratorStats(stats) {
       const counts = stats.note_counts || {};
+      const sections = (stats.sections || []).map((section) => `${section.name} ${section.bars}`).join(" · ");
       const items = [
         [currentLanguage === "en" ? "Length" : "Длительность", `${stats.duration_seconds}s · ${stats.bars} bars`],
         ["BPM", stats.bpm],
         [currentLanguage === "en" ? "Key" : "Тональность", stats.key],
         [currentLanguage === "en" ? "Style" : "Стиль", stats.style],
+        [currentLanguage === "en" ? "Form" : "Форма", sections || stats.arrangement || "loop"],
         [currentLanguage === "en" ? "Notes" : "Ноты", `Bass ${counts.bass || 0} · Melody ${counts.melody || 0} · Drums ${counts.drums || 0}`],
         ["Seed", stats.seed],
       ];
@@ -3515,6 +3532,43 @@ INDEX_HTML = """<!doctype html>
       generatorStopButton.disabled = true;
     }
 
+    function generatorSettingsSnapshot(stats) {
+      return {
+        style: generatorStyle.value, key: generatorKey.value, scale: generatorScale.value,
+        bpm: generatorBpm.value, duration: generatorDuration.value, arrangement: generatorArrangement.value,
+        swing: generatorSwing.value, humanize: generatorHumanize.value, density: generatorDensity.value,
+        seed: stats.seed, motif: generatorMotif.value,
+        bass: generatorBass.checked, melody: generatorMelody.checked, drums: generatorDrums.checked,
+      };
+    }
+
+    function getGeneratorHistory() {
+      try { return JSON.parse(localStorage.getItem(generatorHistoryKey) || "[]"); } catch (_) { return []; }
+    }
+
+    function renderGeneratorHistory() {
+      const entries = getGeneratorHistory();
+      generatorHistory.hidden = !entries.length;
+      generatorHistoryList.innerHTML = entries.map((entry, index) => `<div class="generator-history-item"><div><strong>${escapeHtml(entry.style)} · ${escapeHtml(entry.key)} ${escapeHtml(entry.scale)}</strong><span>${escapeHtml(String(entry.bpm))} BPM · ${escapeHtml(entry.arrangement)} · seed ${escapeHtml(String(entry.seed))}</span></div><button type="button" class="history-restore" data-history-index="${index}">Загрузить</button></div>`).join("");
+    }
+
+    function saveGeneratorHistory(stats) {
+      const snapshot = generatorSettingsSnapshot(stats);
+      const entries = getGeneratorHistory().filter((entry) => entry.seed !== snapshot.seed);
+      entries.unshift(snapshot);
+      localStorage.setItem(generatorHistoryKey, JSON.stringify(entries.slice(0, 6)));
+      renderGeneratorHistory();
+    }
+
+    function restoreGeneratorSettings(entry) {
+      generatorStyle.value = entry.style; generatorKey.value = entry.key; generatorScale.value = entry.scale;
+      generatorBpm.value = entry.bpm; generatorDuration.value = entry.duration; generatorArrangement.value = entry.arrangement || "loop";
+      generatorSwing.value = entry.swing; generatorHumanize.value = entry.humanize; generatorDensity.value = entry.density;
+      generatorSeed.value = entry.seed; generatorMotif.value = entry.motif || "";
+      generatorBass.checked = Boolean(entry.bass); generatorMelody.checked = Boolean(entry.melody); generatorDrums.checked = Boolean(entry.drums);
+      generatorStatus.textContent = currentLanguage === "en" ? "Saved settings loaded." : "Сохранённые настройки загружены.";
+    }
+
     function playGeneratedPreview() {
       if (!generatedPreviewNotes.length) return;
       stopGeneratedPreview();
@@ -3547,7 +3601,7 @@ INDEX_HTML = """<!doctype html>
       generatorStatus.textContent = currentLanguage === "en" ? "Generating musical parts..." : "Генерирую музыкальные партии...";
       const formData = new FormData();
       formData.append("style", generatorStyle.value); formData.append("key", generatorKey.value); formData.append("scale", generatorScale.value);
-      formData.append("bpm", generatorBpm.value); formData.append("duration_seconds", generatorDuration.value);
+      formData.append("bpm", generatorBpm.value); formData.append("duration_seconds", generatorDuration.value); formData.append("arrangement", generatorArrangement.value);
       formData.append("swing", generatorSwing.value); formData.append("humanize", generatorHumanize.value); formData.append("density", generatorDensity.value);
       formData.append("parts", parts.join(",")); formData.append("motif", generatorMotif.value);
       if (generatorSeed.value) formData.append("seed", generatorSeed.value);
@@ -3556,7 +3610,7 @@ INDEX_HTML = """<!doctype html>
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || "Generator failed.");
         downloadBase64Midi(payload.filename, payload.midi_base64);
-        renderGeneratorStats(payload.stats); renderGeneratedMidiPreview(payload.midi_base64, payload.stats); setCredits(payload.credits_remaining ?? creditBalance - 1);
+        renderGeneratorStats(payload.stats); renderGeneratedMidiPreview(payload.midi_base64, payload.stats); saveGeneratorHistory(payload.stats); setCredits(payload.credits_remaining ?? creditBalance - 1);
         generatorSeed.value = payload.stats.seed; generatorStatus.textContent = currentLanguage === "en" ? `Done. Downloaded ${payload.filename}.` : `Готово. Скачан файл ${payload.filename}.`;
       } catch (error) { generatorStatus.textContent = error.message || "Generator error."; }
       finally { generatorSubmitButton.disabled = false; }
@@ -3607,6 +3661,14 @@ INDEX_HTML = """<!doctype html>
       generatorSeed.value = String((Number(generatorSeed.value) || Math.floor(Math.random() * 100000)) + 1);
       submitGenerator();
     });
+    generatorHistoryList.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-history-index]");
+      if (!button) return;
+      const entry = getGeneratorHistory()[Number(button.dataset.historyIndex)];
+      if (entry) restoreGeneratorSettings(entry);
+    });
+    clearGeneratorHistory.addEventListener("click", () => { localStorage.removeItem(generatorHistoryKey); renderGeneratorHistory(); });
+    renderGeneratorHistory();
 
     style.addEventListener("change", () => {
       styleTouched = true;
@@ -4778,6 +4840,7 @@ async def generate_midi_endpoint(
     swing: float = Form(0.0),
     humanize: float = Form(0.15),
     density: float = Form(0.6),
+    arrangement: str = Form("loop"),
     parts: str = Form("bass,melody,drums"),
     seed: int | None = Form(None),
     motif: str = Form(""),
@@ -4785,6 +4848,8 @@ async def generate_midi_endpoint(
 ) -> dict[str, object]:
     if style not in list_generator_styles():
         raise HTTPException(status_code=400, detail="Unsupported generator style.")
+    if arrangement not in list_arrangements():
+        raise HTTPException(status_code=400, detail="Unsupported arrangement.")
     try:
         result = generate_midi(
             MidiGenerationOptions(
@@ -4796,6 +4861,7 @@ async def generate_midi_endpoint(
                 swing=swing,
                 humanize=humanize,
                 density=density,
+                arrangement=arrangement,
                 parts=tuple(part.strip() for part in parts.split(",") if part.strip()),
                 seed=seed,
                 motif=motif,

@@ -90,6 +90,18 @@ class MidiHardeningTests(unittest.TestCase):
         self.assertGreater(result.stats["note_counts"]["drums"], 0)
         self.assertIn(9, {note.channel for note in parsed.notes})
 
+    def test_midi_generator_song_arrangement_reports_sections(self) -> None:
+        result = generate_midi(
+            MidiGenerationOptions(duration_seconds=96, bpm=120, style="pop", key="C", seed=7, arrangement="song")
+        )
+
+        self.assertEqual(result.stats["arrangement"], "song")
+        self.assertEqual(
+            [section["name"] for section in result.stats["sections"]],
+            ["intro", "verse", "chorus", "bridge", "outro"],
+        )
+        self.assertEqual(sum(int(section["bars"]) for section in result.stats["sections"]), result.stats["bars"])
+
     def test_gentle_midi_fix_preserves_pitch_and_most_timing_expression(self) -> None:
         source = build_midi_from_notes([Note(5, 101, 61, 105)], title="live_take")
         result = fix_midi_bytes(
@@ -250,6 +262,7 @@ class WebEndpointTests(unittest.TestCase):
                     "parts": "bass,melody,drums",
                     "seed": "123",
                     "motif": "60,63,67",
+                    "arrangement": "song",
                 },
             )
 
@@ -258,7 +271,16 @@ class WebEndpointTests(unittest.TestCase):
         self.assertTrue(payload["filename"].endswith(".mid"))
         self.assertTrue(payload["midi_base64"])
         self.assertEqual(payload["stats"]["key"], "Eb minor")
+        self.assertEqual(payload["stats"]["arrangement"], "song")
+        self.assertTrue(payload["stats"]["sections"])
         self.assertGreater(payload["stats"]["note_counts"]["drums"], 0)
+
+    def test_midi_generator_rejects_unknown_arrangement(self) -> None:
+        with TestClient(app) as client:
+            response = client.post("/api/midi/generate", data={"arrangement": "album"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("arrangement", response.json()["detail"].lower())
 
     def wait_for_audio_job(self, client: TestClient, job_id: str) -> dict:
         payload = {}

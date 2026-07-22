@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased - Generator 2.1
+
+- Added `loop` and `song` arrangement modes; song mode shapes intro, verse, chorus, bridge, and outro energy.
+- Added generator presets, reproducible variant history, and one-click restore of saved settings and seed.
+- Added a piano-roll preview built from the MIDI that was actually returned by the API, plus a short browser synth preview.
+- Added coverage for song arrangement metadata and the public generator API.
+
 ## v0.2.0 - MIDI Generator
 
 - Added MIDI Generator as a new iMixing product tab.
