@@ -1,13 +1,26 @@
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT UNIQUE,
+  display_name TEXT,
+  password_hash TEXT,
   created_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  expires_at REAL NOT NULL,
+  created_at REAL NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   user_id TEXT,
   title TEXT,
+  kind TEXT NOT NULL DEFAULT 'workspace',
+  status TEXT NOT NULL DEFAULT 'ready',
+  metadata_json TEXT,
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL,
   FOREIGN KEY(user_id) REFERENCES users(id)
@@ -58,4 +71,6 @@ CREATE TABLE IF NOT EXISTS waitlist_signups (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audio_jobs_status ON audio_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_projects_user_updated ON projects(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_waitlist_email ON waitlist_signups(email);

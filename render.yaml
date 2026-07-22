@@ -22,6 +22,10 @@ services:
         value: /tmp/imixing_storage
       - key: IMIXING_QUEUE_BACKEND
         value: background
+      - key: IMIXING_AUTH_COOKIE
+        value: imixing_auth_session
+      - key: IMIXING_AUTH_SESSION_DAYS
+        value: 30
       - key: IMIXING_MAX_AUDIO_UPLOAD_MB
         value: 250
       - key: IMIXING_MAX_AUDIO_STEMS
@@ -34,6 +38,12 @@ services:
         value: true
       - key: SENTRY_DSN
         sync: false
+      - key: IMIXING_STORAGE_BUCKET
+        sync: false
+      - key: IMIXING_STORAGE_ENDPOINT_URL
+        sync: false
+      - key: IMIXING_STORAGE_REGION
+        value: auto
 
   # Placeholder for the next production step: switch IMIXING_QUEUE_BACKEND to redis/rq/celery,
   # provision Redis, and run the worker as a separate Render Background Worker.

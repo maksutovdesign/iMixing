@@ -217,6 +217,34 @@ class MidiHardeningTests(unittest.TestCase):
         self.assertEqual(min(note.pitch for note in second_segment) % 12, 0)
 
 
+class AccountAndProjectTests(unittest.TestCase):
+    def test_account_registration_and_generated_midi_project_history(self) -> None:
+        client = TestClient(app)
+        email = f"producer-{time.time_ns()}@example.test"
+
+        registered = client.post(
+            "/api/auth/register",
+            json={"email": email, "password": "sound-design-2026", "display_name": "Producer"},
+        )
+        self.assertEqual(registered.status_code, 201)
+        self.assertTrue(registered.json()["authenticated"])
+
+        generated = client.post(
+            "/api/midi/generate",
+            data={"style": "house", "key": "C", "scale": "minor", "bpm": "124", "duration_seconds": "16"},
+        )
+        self.assertEqual(generated.status_code, 200)
+        self.assertIsNotNone(generated.json()["project_id"])
+
+        projects = client.get("/api/projects")
+        self.assertEqual(projects.status_code, 200)
+        self.assertEqual(projects.json()["projects"][0]["kind"], "midi_generator")
+
+    def test_projects_require_an_authenticated_account(self) -> None:
+        response = TestClient(app).get("/api/projects")
+        self.assertEqual(response.status_code, 401)
+
+
 class AudioHardeningTests(unittest.TestCase):
     def test_mastering_target_reads_true_peak_ceiling(self) -> None:
         self.assertEqual(target_true_peak_dbtp("streaming:-14LUFS:-1dBTP"), -1.0)

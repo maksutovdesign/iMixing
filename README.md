@@ -21,6 +21,7 @@ Core product directions:
 - `Mix & Master`: upload separated WAV stems, review or override the detected role of every track in Mix Console, analyze levels and clipping, render a processed stereo mix, apply a basic master bus, and export `master.wav`.
 - `MIDI Doctor`: upload `.mid` or `.midi`, choose a musical profile, repair timing, voicing density, note ranges, velocity, weak notes, and DAW compatibility. Drum Doctor is a dedicated mode that cleans drum timing and duplicate hits while retaining the original MIDI pad mapping.
 - `MIDI Generator`: create rule-based basslines, melodies, and drum-machine MIDI up to 10 minutes long, with style, key, scale, BPM, swing, humanize, density, motif, reproducible seed, loop/song form, browser preview, presets, and physical MIDI-keyboard capture controls.
+- `Account & Project Library`: optional email/password account access with persistent sessions and a personal history of new MIDI Doctor, MIDI Generator, and Mix & Master jobs.
 
 Primary audience:
 
@@ -36,6 +37,10 @@ Useful project documents:
 - [Marketing playbook](docs/MARKETING_PLAYBOOK_2026-05-30.md)
 - [Service description](docs/SERVICE_DESCRIPTION.md)
 - [Agent specification](docs/AGENT_SPEC.md)
+
+### Production infrastructure
+
+The default demo remains self-contained: SQLite, local file storage, and FastAPI background tasks. For a public deployment, set `IMIXING_DATABASE_URL`, `IMIXING_STORAGE_BACKEND=s3` (or `r2`), the `IMIXING_STORAGE_*` bucket settings, and a real queue backend. The S3/R2 adapter produces presigned download URLs; the queue configuration stays intentionally conservative until a Redis worker is provisioned. Copy `.env.example` as the starting point and never commit live credentials.
 
 ## What The Agent Does
 

@@ -38,18 +38,34 @@ class LocalObjectStorage(ObjectStorage):
 
 class S3ObjectStorage(ObjectStorage):
     def __init__(self, settings: AppSettings) -> None:
-        self.bucket = ""
-        self.endpoint = ""
+        if not settings.storage_bucket:
+            raise ValueError("IMIXING_STORAGE_BUCKET is required when using an S3/R2 storage backend.")
+        try:
+            import boto3
+        except ModuleNotFoundError as error:
+            raise RuntimeError("Install boto3 to use an S3/R2 storage backend.") from error
+        self.bucket = settings.storage_bucket
+        self.endpoint = settings.storage_endpoint_url
         self.settings = settings
-
-    def put_file(self, source: Path, key: str) -> StoredObject:
-        raise RuntimeError(
-            "S3/R2 storage backend is configured but not connected yet. "
-            "Install and wire boto3 or an S3-compatible client with IMIXING_STORAGE_* env vars."
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=settings.storage_endpoint_url or None,
+            region_name=settings.storage_region,
         )
 
+    def put_file(self, source: Path, key: str) -> StoredObject:
+        normalized_key = key.lstrip("/")
+        self.client.upload_file(str(source), self.bucket, normalized_key)
+        return StoredObject(key=normalized_key, uri=f"s3://{self.bucket}/{normalized_key}")
+
     def signed_url(self, key: str, *, expires_seconds: int = 3600) -> str:
-        raise RuntimeError("S3/R2 signed URLs require a configured storage client.")
+        return str(
+            self.client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket, "Key": key.lstrip("/")},
+                ExpiresIn=max(60, min(expires_seconds, 7 * 24 * 60 * 60)),
+            )
+        )
 
 
 def build_storage(settings: AppSettings) -> ObjectStorage:

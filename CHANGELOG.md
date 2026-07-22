@@ -2,6 +2,8 @@
 
 ## Unreleased - Product Workflow 2.3
 
+- Added optional password-protected iMixing accounts, persistent 30-day sessions, and a project library that records new MIDI Doctor, MIDI Generator, and Mix & Master work for signed-in users.
+- Added a production-ready S3/R2 adapter with upload and presigned-download support, plus explicit storage and account-session environment variables.
 - Added Drum Doctor: a working MIDI cleanup mode for drum patterns that preserves pad pitches, tightens timing, normalizes velocity, and removes duplicate hits.
 - Added Mix Console role controls before audio rendering, so automatic role detection can be overridden per uploaded stem.
 - Made the shared product header context-aware across MIDI Doctor, Mix & Master, MIDI Generator, and Pricing.

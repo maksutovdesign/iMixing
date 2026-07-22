@@ -9,6 +9,7 @@ description = "Prototype agent for analyzing music stems and generating mix/mast
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "boto3>=1.35",
     "fastapi>=0.115",
     "httpx2>=0.28",
     "librosa>=0.10",

@@ -27,6 +27,7 @@ class AudioJob:
     output_dir: Path
     genre: str
     target: str
+    project_id: str | None = None
     role_overrides: dict[str, str] = field(default_factory=dict)
     status: str = "queued"
     created_at: float = field(default_factory=time.time)
@@ -45,6 +46,7 @@ class AudioJob:
             "progress": progress,
             "genre": self.genre,
             "target": self.target,
+            "project_id": self.project_id,
             "role_overrides": self.role_overrides,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -58,7 +60,9 @@ _jobs: dict[str, AudioJob] = {}
 _jobs_lock = threading.Lock()
 
 
-def create_audio_job(*, genre: str, target: str, role_overrides: dict[str, str] | None = None) -> AudioJob:
+def create_audio_job(
+    *, genre: str, target: str, project_id: str | None = None, role_overrides: dict[str, str] | None = None
+) -> AudioJob:
     JOB_ROOT.mkdir(parents=True, exist_ok=True)
     job_id = uuid.uuid4().hex
     job_dir = JOB_ROOT / job_id
@@ -73,6 +77,7 @@ def create_audio_job(*, genre: str, target: str, role_overrides: dict[str, str] 
         output_dir=output_dir,
         genre=genre,
         target=target,
+        project_id=project_id,
         role_overrides=role_overrides or {},
     )
     with _jobs_lock:
@@ -156,5 +161,11 @@ def _persist_job(job: AudioJob) -> None:
             warnings_json=json.dumps(job.warnings, ensure_ascii=False) if job.warnings else None,
             result_json=json.dumps(job.result, ensure_ascii=False) if job.result else None,
         )
+        if job.project_id:
+            _db.update_project_status(
+                job.project_id,
+                status=job.status,
+                metadata_json=json.dumps(job.result, ensure_ascii=False) if job.result else None,
+            )
     except Exception:
         pass

@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, Body, Cookie, FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
+from .auth import hash_password, normalize_email, validate_password, verify_password
 from .audio_jobs import cleanup_audio_job, create_audio_job, get_audio_job, render_audio_job
 from .midi_generator import MidiGenerationOptions, generate_midi, list_arrangements, list_generator_styles
 from .midi_fixer import (
@@ -1822,6 +1823,15 @@ INDEX_HTML = """<!doctype html>
       color: #000;
     }
 
+    .account-button { min-height: 34px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--ink); box-shadow: none; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+    .account-button:hover { border-color: var(--accent); color: var(--accent); }
+    .account-dialog { width: min(560px, calc(100% - 28px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 14px; background: #0b0b0b; color: var(--ink); box-shadow: 0 26px 90px rgba(0, 0, 0, .7); }
+    .account-dialog::backdrop { background: rgba(0, 0, 0, .72); }
+    .account-dialog-inner { display: grid; gap: 18px; padding: 24px; }
+    .account-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }.account-dialog-head h2 { margin: 5px 0 0; font-size: 24px; letter-spacing: 0; }.account-kicker { color: var(--accent); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .dialog-close { width: 34px; min-width: 34px; height: 34px; min-height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--ink); box-shadow: none; font-size: 20px; line-height: 1; }
+    .account-message { min-height: 20px; margin: 0; color: var(--muted); font-size: 13px; }.account-form { display: grid; gap: 10px; }.account-form[hidden], .account-logged-out[hidden], .account-logged-in[hidden] { display: none; }.account-form input { width: 100%; }.account-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.account-actions button { min-height: 42px; }.project-library { display: grid; gap: 8px; padding-top: 18px; border-top: 1px solid var(--line); }.project-library-head { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }.project-list { display: grid; gap: 7px; max-height: 250px; overflow: auto; }.project-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #080808; }.project-row strong { display: block; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }.project-row span { color: var(--muted); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; text-transform: uppercase; }.project-empty { margin: 0; color: var(--muted); font-size: 13px; }
+
     .tabs {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1977,9 +1987,32 @@ INDEX_HTML = """<!doctype html>
             <strong id="creditBalance">0</strong>
             <span data-i18n="credits.label">демо-баллы</span>
           </div>
+          <button id="accountButton" class="account-button" type="button">Гость</button>
         </div>
       </div>
     </section>
+
+    <dialog class="account-dialog" id="accountDialog" aria-label="Account">
+      <div class="account-dialog-inner">
+        <div class="account-dialog-head">
+          <div><div class="account-kicker">iMixing account</div><h2 id="accountTitle">Проекты и доступ</h2></div>
+          <button class="dialog-close" id="accountCloseButton" type="button" aria-label="Close">×</button>
+        </div>
+        <p class="account-message" id="accountMessage">Войдите, чтобы сохранять историю обработок и возвращаться к проектам.</p>
+        <div class="account-logged-out" id="accountLoggedOut">
+          <form class="account-form" id="accountForm">
+            <input id="accountNameInput" type="text" maxlength="80" placeholder="Имя или артист">
+            <input id="accountEmailInput" type="email" autocomplete="email" placeholder="Email" required>
+            <input id="accountPasswordInput" type="password" autocomplete="current-password" minlength="10" placeholder="Пароль: минимум 10 символов" required>
+            <div class="account-actions"><button type="submit" data-auth-mode="login">Войти</button><button class="secondary-button" type="submit" data-auth-mode="register">Создать аккаунт</button></div>
+          </form>
+        </div>
+        <div class="account-logged-in" id="accountLoggedIn" hidden>
+          <div class="project-library"><div class="project-library-head"><span>Библиотека проектов</span><span id="projectCount">0 проектов</span></div><div class="project-list" id="projectList"></div></div>
+          <button class="secondary-button" id="logoutButton" type="button">Выйти из аккаунта</button>
+        </div>
+      </div>
+    </dialog>
 
     <nav class="tabs" aria-label="Режим сервиса">
       <button class="tab-button active" type="button" data-tab="midiPanel">
@@ -2510,6 +2543,19 @@ INDEX_HTML = """<!doctype html>
     const fileTitle = document.getElementById("fileTitle");
     const fileCopy = document.getElementById("fileCopy");
     const creditBalanceEl = document.getElementById("creditBalance");
+    const accountButton = document.getElementById("accountButton");
+    const accountDialog = document.getElementById("accountDialog");
+    const accountCloseButton = document.getElementById("accountCloseButton");
+    const accountForm = document.getElementById("accountForm");
+    const accountNameInput = document.getElementById("accountNameInput");
+    const accountEmailInput = document.getElementById("accountEmailInput");
+    const accountPasswordInput = document.getElementById("accountPasswordInput");
+    const accountLoggedOut = document.getElementById("accountLoggedOut");
+    const accountLoggedIn = document.getElementById("accountLoggedIn");
+    const accountMessage = document.getElementById("accountMessage");
+    const projectList = document.getElementById("projectList");
+    const projectCount = document.getElementById("projectCount");
+    const logoutButton = document.getElementById("logoutButton");
     const heroEyebrow = document.getElementById("heroEyebrow");
     const heroTitle = document.getElementById("heroTitle");
     const heroSubtitle = document.getElementById("heroSubtitle");
@@ -3050,6 +3096,7 @@ INDEX_HTML = """<!doctype html>
     let currentFamily = "harmony";
     let styleTouched = false;
     let creditBalance = loadCredits();
+    let currentAccount = null;
 
     function t(key, replacements = {}) {
       const dictionary = translations[currentLanguage] || translations.ru;
@@ -3122,6 +3169,86 @@ INDEX_HTML = """<!doctype html>
       } catch (error) {
         console.warn("Credit refresh failed", error);
       }
+    }
+
+    function accountText(ru, en) { return currentLanguage === "en" ? en : ru; }
+
+    function renderAccount() {
+      const signedIn = Boolean(currentAccount);
+      accountLoggedOut.hidden = signedIn;
+      accountLoggedIn.hidden = !signedIn;
+      accountButton.textContent = signedIn
+        ? (currentAccount.display_name || currentAccount.email.split("@")[0]).slice(0, 18)
+        : accountText("Гость", "Guest");
+      accountMessage.textContent = signedIn
+        ? accountText("Здесь сохраняются ваши новые обработки и генерации MIDI.", "Your new processing jobs and MIDI generations are saved here.")
+        : accountText("Войдите, чтобы сохранять историю обработок и возвращаться к проектам.", "Sign in to save processing history and return to your projects.");
+    }
+
+    function formatProjectKind(kind) {
+      const labels = { midi_fix: "MIDI Doctor", midi_generator: "MIDI Generator", audio_mix: "Mix & Master" };
+      return labels[kind] || kind;
+    }
+
+    async function refreshAccount() {
+      try {
+        const response = await fetch("/api/auth/me");
+        const payload = await response.json();
+        currentAccount = payload.authenticated ? payload.user : null;
+      } catch (error) {
+        currentAccount = null;
+      }
+      renderAccount();
+      if (currentAccount) await refreshProjects();
+    }
+
+    async function refreshProjects() {
+      if (!currentAccount) return;
+      try {
+        const response = await fetch("/api/projects");
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "Projects unavailable");
+        const projects = payload.projects || [];
+        projectCount.textContent = accountText(`${projects.length} проектов`, `${projects.length} projects`);
+        projectList.innerHTML = projects.length ? projects.map((project) => `
+          <div class="project-row"><div><strong>${escapeHtml(project.title)}</strong><span>${escapeHtml(formatProjectKind(project.kind))}</span></div><span>${escapeHtml(project.status)}</span></div>
+        `).join("") : `<p class="project-empty">${accountText("Пока нет сохранённых обработок. Запустите MIDI Doctor, Generator или Mix & Master.", "No saved jobs yet. Run MIDI Doctor, Generator, or Mix & Master.")}</p>`;
+      } catch (error) {
+        projectList.innerHTML = `<p class="project-empty">${accountText("Не удалось загрузить библиотеку проектов.", "Could not load project library.")}</p>`;
+      }
+    }
+
+    function escapeHtml(value) {
+      const element = document.createElement("div");
+      element.textContent = String(value || "");
+      return element.innerHTML;
+    }
+
+    async function submitAccount(event) {
+      event.preventDefault();
+      const button = event.submitter;
+      const mode = button?.dataset.authMode || "login";
+      const body = { email: accountEmailInput.value, password: accountPasswordInput.value };
+      if (mode === "register") body.display_name = accountNameInput.value;
+      accountMessage.textContent = accountText("Проверяем доступ...", "Checking access...");
+      try {
+        const response = await fetch(`/api/auth/${mode}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "Account request failed");
+        currentAccount = payload.user;
+        accountPasswordInput.value = "";
+        renderAccount();
+        await refreshProjects();
+      } catch (error) {
+        accountMessage.textContent = error.message || accountText("Не удалось войти.", "Could not sign in.");
+      }
+    }
+
+    async function logoutAccount() {
+      await fetch("/api/auth/logout", { method: "POST" });
+      currentAccount = null;
+      renderAccount();
+      projectList.innerHTML = "";
     }
 
     async function addCredits(amount) {
@@ -3453,6 +3580,7 @@ INDEX_HTML = """<!doctype html>
         renderStats(payload.stats, payload.instrument_family);
         setCredits(payload.credits_remaining ?? creditBalance - 1);
         downloadBase64Midi(payload.filename, payload.midi_base64);
+        if (payload.project_id && currentAccount) refreshProjects();
         statusEl.textContent = t("midi.done", { filename: payload.filename });
       } catch (error) {
         statusEl.textContent = error.message || (currentLanguage === "en" ? "Processing error." : "Ошибка обработки.");
@@ -3493,6 +3621,7 @@ INDEX_HTML = """<!doctype html>
         renderAudioStats(completedJob.result);
         showMasterPreview(completedJob.result);
         setCredits(payload.credits_remaining ?? creditBalance - 5);
+        if (payload.project_id && currentAccount) refreshProjects();
         if (completedJob.warnings && completedJob.warnings.length) {
           audioStatusEl.textContent = `${t("audio.done")} ${completedJob.warnings.join(" ")}`;
         } else {
@@ -3678,7 +3807,7 @@ INDEX_HTML = """<!doctype html>
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || "Generator failed.");
         downloadBase64Midi(payload.filename, payload.midi_base64);
-        renderGeneratorStats(payload.stats); renderGeneratedMidiPreview(payload.midi_base64, payload.stats); saveGeneratorHistory(payload.stats); setCredits(payload.credits_remaining ?? creditBalance - 1);
+        renderGeneratorStats(payload.stats); renderGeneratedMidiPreview(payload.midi_base64, payload.stats); saveGeneratorHistory(payload.stats); setCredits(payload.credits_remaining ?? creditBalance - 1); if (payload.project_id && currentAccount) refreshProjects();
         generatorSeed.value = payload.stats.seed; generatorStatus.textContent = currentLanguage === "en" ? `Done. Downloaded ${payload.filename}.` : `Готово. Скачан файл ${payload.filename}.`;
       } catch (error) { generatorStatus.textContent = error.message || "Generator error."; }
       finally { generatorSubmitButton.disabled = false; }
@@ -3765,6 +3894,16 @@ INDEX_HTML = """<!doctype html>
 
     submitButton.addEventListener("click", submit);
 
+    accountButton.addEventListener("click", () => {
+      if (typeof accountDialog.showModal === "function") accountDialog.showModal();
+    });
+    accountCloseButton.addEventListener("click", () => accountDialog.close());
+    accountDialog.addEventListener("click", (event) => {
+      if (event.target === accountDialog) accountDialog.close();
+    });
+    accountForm.addEventListener("submit", submitAccount);
+    logoutButton.addEventListener("click", logoutAccount);
+
     creditPackButtons.forEach((button) => {
       button.addEventListener("click", () => {
         addCredits(Number(button.dataset.credits || "0"));
@@ -3825,6 +3964,7 @@ INDEX_HTML = """<!doctype html>
     applyLanguage(currentLanguage);
     setCredits(creditBalance);
     refreshCredits();
+    refreshAccount();
   </script>
 </body>
 </html>
@@ -4660,6 +4800,7 @@ FREE_DEMO_CREDITS = settings.free_demo_credits
 MIDI_CREDIT_COST = settings.midi_credit_cost
 AUDIO_CREDIT_COST = settings.audio_credit_cost
 CREDIT_COOKIE_NAME = settings.credit_cookie_name
+AUTH_COOKIE_NAME = settings.auth_cookie_name
 
 
 def resolve_host_port() -> tuple[str, int]:
@@ -4684,6 +4825,50 @@ def _resolve_credit_session(response: Response, credit_session: str | None) -> s
             max_age=60 * 60 * 24 * 30,
         )
     return session_id
+
+
+def _current_account(auth_session: str | None):
+    return database.account_for_session(auth_session)
+
+
+def _set_auth_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        session_id,
+        httponly=True,
+        samesite="lax",
+        secure=settings.public_base_url.startswith("https://"),
+        max_age=settings.auth_session_seconds,
+    )
+
+
+def _project_payload(project) -> dict[str, object]:
+    try:
+        metadata = json.loads(project.metadata_json) if project.metadata_json else None
+    except json.JSONDecodeError:
+        metadata = None
+    return {
+        "id": project.id,
+        "title": project.title,
+        "kind": project.kind,
+        "status": project.status,
+        "metadata": metadata,
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+    }
+
+
+def _create_project_for_account(account, *, title: str, kind: str, status: str, metadata: dict[str, object]) -> str | None:
+    if account is None:
+        return None
+    project = database.create_project(
+        user_id=account.id,
+        title=title,
+        kind=kind,
+        status=status,
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+    return project.id
 
 
 def _credit_balance(response: Response, credit_session: str | None) -> int:
@@ -4753,6 +4938,7 @@ async def _enqueue_audio_mix_job(
     genre: str,
     target: str,
     role_overrides: dict[str, str] | None = None,
+    project_id: str | None = None,
 ) -> dict[str, str | int]:
     if not files:
         raise HTTPException(status_code=400, detail="Upload at least one WAV stem.")
@@ -4762,7 +4948,7 @@ async def _enqueue_audio_mix_job(
         raise HTTPException(status_code=400, detail="Unsupported audio genre.")
 
     requested_overrides = role_overrides or {}
-    job = create_audio_job(genre=genre, target=target)
+    job = create_audio_job(genre=genre, target=target, project_id=project_id)
     total_size = 0
     used_names: set[str] = set()
     resolved_overrides: dict[str, str] = {}
@@ -4798,6 +4984,7 @@ async def _enqueue_audio_mix_job(
 
     database.save_audio_job(
         job_id=job.id,
+        project_id=job.project_id,
         genre=job.genre,
         target=job.target,
         status=job.status,
@@ -4855,6 +5042,80 @@ async def get_credits(
     return {"balance": _credit_balance(response, credit_session)}
 
 
+@app.get("/api/auth/me")
+async def auth_me(auth_session: str | None = Cookie(None, alias=AUTH_COOKIE_NAME)) -> dict[str, object]:
+    account = _current_account(auth_session)
+    if account is None:
+        return {"authenticated": False}
+    return {
+        "authenticated": True,
+        "user": {"id": account.id, "email": account.email, "display_name": account.display_name},
+    }
+
+
+@app.post("/api/auth/register", status_code=201)
+async def register_account(
+    response: Response,
+    email: str = Body(..., embed=True),
+    password: str = Body(..., embed=True),
+    display_name: str | None = Body(None, embed=True),
+) -> dict[str, object]:
+    try:
+        normalized_email = normalize_email(email)
+        normalized_password = validate_password(password)
+        account = database.create_account(
+            email=normalized_email,
+            password_hash=hash_password(normalized_password),
+            display_name=display_name.strip()[:80] if display_name and display_name.strip() else None,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    session_id = database.create_auth_session(account.id, lifetime_seconds=settings.auth_session_seconds)
+    _set_auth_cookie(response, session_id)
+    track_event(logger, settings, "account_registered", user_id=account.id)
+    return {"authenticated": True, "user": {"id": account.id, "email": account.email, "display_name": account.display_name}}
+
+
+@app.post("/api/auth/login")
+async def login_account(
+    response: Response,
+    email: str = Body(..., embed=True),
+    password: str = Body(..., embed=True),
+) -> dict[str, object]:
+    try:
+        normalized_email = normalize_email(email)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Invalid email or password.") from error
+    record = database.account_by_email(normalized_email)
+    if record is None or not verify_password(password, record[1]):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    account = record[0]
+    session_id = database.create_auth_session(account.id, lifetime_seconds=settings.auth_session_seconds)
+    _set_auth_cookie(response, session_id)
+    track_event(logger, settings, "account_logged_in", user_id=account.id)
+    return {"authenticated": True, "user": {"id": account.id, "email": account.email, "display_name": account.display_name}}
+
+
+@app.post("/api/auth/logout")
+async def logout_account(
+    response: Response,
+    auth_session: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+) -> dict[str, bool]:
+    database.revoke_auth_session(auth_session)
+    response.delete_cookie(AUTH_COOKIE_NAME)
+    return {"authenticated": False}
+
+
+@app.get("/api/projects")
+async def list_account_projects(
+    auth_session: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+) -> dict[str, object]:
+    account = _current_account(auth_session)
+    if account is None:
+        raise HTTPException(status_code=401, detail="Sign in to access project history.")
+    return {"projects": [_project_payload(project) for project in database.list_projects(account.id)]}
+
+
 @app.post("/api/credits/add")
 async def add_credits(
     response: Response,
@@ -4882,6 +5143,7 @@ async def fix_midi(
     output_format: int = Form(1),
     include_track_titles: bool = Form(False),
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
+    auth_session: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
 ) -> dict[str, object]:
     filename = file.filename or "upload.mid"
     if not filename.lower().endswith((".mid", ".midi")):
@@ -4915,6 +5177,13 @@ async def fix_midi(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     credits_remaining = _spend_credits(response, credit_session, MIDI_CREDIT_COST, "MIDI fix")
+    project_id = _create_project_for_account(
+        _current_account(auth_session),
+        title=f"MIDI Doctor - {Path(filename).stem}",
+        kind="midi_fix",
+        status="done",
+        metadata={"filename": result.output_filename, "instrument_family": instrument_family, "style": style},
+    )
     track_event(logger, settings, "midi_fix_completed", filename=filename, style=style, instrument_family=instrument_family)
     return {
         "filename": result.output_filename,
@@ -4923,6 +5192,7 @@ async def fix_midi(
         "stats": asdict(result.stats),
         "midi_base64": base64.b64encode(result.midi_bytes).decode("ascii"),
         "credits_remaining": credits_remaining,
+        "project_id": project_id,
     }
 
 
@@ -4942,6 +5212,7 @@ async def generate_midi_endpoint(
     seed: int | None = Form(None),
     motif: str = Form(""),
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
+    auth_session: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
 ) -> dict[str, object]:
     if style not in list_generator_styles():
         raise HTTPException(status_code=400, detail="Unsupported generator style.")
@@ -4967,9 +5238,17 @@ async def generate_midi_endpoint(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     credits_remaining = _spend_credits(response, credit_session, MIDI_CREDIT_COST, "MIDI Generator")
+    project_id = _create_project_for_account(
+        _current_account(auth_session),
+        title=f"MIDI Generator - {style.title()} {key}",
+        kind="midi_generator",
+        status="done",
+        metadata={"style": style, "key": key, "scale": scale, "bpm": bpm, "duration_seconds": duration_seconds},
+    )
     track_event(logger, settings, "midi_generated", style=style, bpm=bpm, duration_seconds=duration_seconds)
     payload = result.to_api_dict()
     payload["credits_remaining"] = credits_remaining
+    payload["project_id"] = project_id
     return payload
 
 
@@ -4982,17 +5261,28 @@ async def mix_audio(
     target: str = Form("streaming:-14LUFS:-1dBTP"),
     role_overrides: str = Form("{}"),
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
+    auth_session: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
 ) -> dict[str, str | int]:
     if _credit_balance(response, credit_session) < AUDIO_CREDIT_COST:
         raise HTTPException(status_code=402, detail=f"Mix & Master requires {AUDIO_CREDIT_COST} demo credits.")
+    project_id = _create_project_for_account(
+        _current_account(auth_session),
+        title=f"Mix & Master - {Path(files[0].filename or 'session').stem}",
+        kind="audio_mix",
+        status="queued",
+        metadata={"stem_count": len(files), "genre": genre, "target": target},
+    )
     payload = await _enqueue_audio_mix_job(
         background_tasks=background_tasks,
         files=files,
         genre=genre,
         target=target,
         role_overrides=_parse_role_overrides(role_overrides),
+        project_id=project_id,
     )
     payload["credits_remaining"] = _spend_credits(response, credit_session, AUDIO_CREDIT_COST, "Mix & Master")
+    if project_id:
+        payload["project_id"] = project_id
     payload["detail"] = "Audio mix now runs as an async job. Poll the returned URL and download files when the job is done."
     return payload
 
@@ -5006,17 +5296,28 @@ async def create_audio_mix_job(
     target: str = Form("streaming:-14LUFS:-1dBTP"),
     role_overrides: str = Form("{}"),
     credit_session: str | None = Cookie(None, alias=CREDIT_COOKIE_NAME),
+    auth_session: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
 ) -> dict[str, str | int]:
     if _credit_balance(response, credit_session) < AUDIO_CREDIT_COST:
         raise HTTPException(status_code=402, detail=f"Mix & Master requires {AUDIO_CREDIT_COST} demo credits.")
+    project_id = _create_project_for_account(
+        _current_account(auth_session),
+        title=f"Mix & Master - {Path(files[0].filename or 'session').stem}",
+        kind="audio_mix",
+        status="queued",
+        metadata={"stem_count": len(files), "genre": genre, "target": target},
+    )
     payload = await _enqueue_audio_mix_job(
         background_tasks=background_tasks,
         files=files,
         genre=genre,
         target=target,
         role_overrides=_parse_role_overrides(role_overrides),
+        project_id=project_id,
     )
     payload["credits_remaining"] = _spend_credits(response, credit_session, AUDIO_CREDIT_COST, "Mix & Master")
+    if project_id:
+        payload["project_id"] = project_id
     return payload
 
 

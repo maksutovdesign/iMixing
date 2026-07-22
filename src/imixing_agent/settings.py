@@ -44,9 +44,14 @@ class AppSettings:
     midi_credit_cost: int = _env_int("IMIXING_MIDI_CREDIT_COST", 1, minimum=0, maximum=10000)
     audio_credit_cost: int = _env_int("IMIXING_AUDIO_CREDIT_COST", 5, minimum=0, maximum=10000)
     credit_cookie_name: str = os.getenv("IMIXING_CREDIT_COOKIE", "imixing_credit_session")
+    auth_cookie_name: str = os.getenv("IMIXING_AUTH_COOKIE", "imixing_auth_session")
+    auth_session_days: int = _env_int("IMIXING_AUTH_SESSION_DAYS", 30, minimum=1, maximum=365)
     queue_backend: str = os.getenv("IMIXING_QUEUE_BACKEND", "background")
     storage_backend: str = os.getenv("IMIXING_STORAGE_BACKEND", "local")
     storage_root: Path = _env_path("IMIXING_STORAGE_ROOT", "/tmp/imixing_storage")
+    storage_bucket: str = os.getenv("IMIXING_STORAGE_BUCKET", "").strip()
+    storage_endpoint_url: str = os.getenv("IMIXING_STORAGE_ENDPOINT_URL", "").strip()
+    storage_region: str = os.getenv("IMIXING_STORAGE_REGION", "auto").strip() or "auto"
     public_base_url: str = os.getenv("IMIXING_PUBLIC_BASE_URL", "").rstrip("/")
     sentry_dsn: str = os.getenv("SENTRY_DSN", "").strip()
     analytics_enabled: bool = _env_bool("IMIXING_ANALYTICS_ENABLED", True)
@@ -59,6 +64,10 @@ class AppSettings:
     @property
     def max_midi_upload_bytes(self) -> int:
         return self.max_midi_upload_mb * 1024 * 1024
+
+    @property
+    def auth_session_seconds(self) -> int:
+        return self.auth_session_days * 24 * 60 * 60
 
     @property
     def is_sqlite(self) -> bool:
